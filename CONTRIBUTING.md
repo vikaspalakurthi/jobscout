@@ -10,8 +10,8 @@ it that way are very welcome.
   bot-protected or login-walled (never — this is a hard rule, don't open a PR for it).
 - **Classifier fixes** (`fetchers.py`: location, work mode, employment type). Add the failing
   string to the test in `tests/test_smoke.py`.
-- **Making the home metro configurable** — today Austin/Texas are wired into `fetchers.py`.
-  Open an issue to discuss the shape before writing code.
+- **A role preset** — one YAML file in `config/presets/` (software engineer, data engineer,
+  SAP/ERP are wanted); see the docs site → Reference → Role presets for the anatomy.
 - **Companies.** Adding a board is config, not code: `config/companies.yaml`. Please include
   the `python detect.py "Name"` output in the PR and watch for slug collisions (a small
   unrelated startup answering on a big company's guessed slug — see `docs/LEARNINGS.md`).
@@ -44,6 +44,26 @@ The long version with a diagram: https://vikaspalakurthi.github.io/jobscout/cont
 4. One concern per PR, imperative commit messages. Fill in the PR template.
 5. A maintainer (and the automated review bot) will comment. Expect questions about the
    three-category rule and about privacy before anything else.
+
+## Branching and releases
+
+- **Trunk-based.** `main` is the only long-lived branch and is protected: no force-pushes, no
+  deletion, linear history. It must always run (server starts, refresh works).
+- Contributors work on short-lived branches (`feat/<slug>`, `fix/<slug>`) in a fork and open a
+  PR; PRs are **squash-merged**, so one PR = one commit on `main`. Label the PR (`enhancement`,
+  `bug`, `board`, `preset`, `documentation`, `dependencies`) - the labels group the release notes.
+- **Versions** follow [semver](https://semver.org) while `0.y.z`: a breaking change (schema,
+  config key, location-class rename, anything in the upgrading page's table) bumps **y**;
+  fixes and additive features bump **z**. `VERSION` holds the current number;
+  `CHANGELOG.md` → *Unreleased* collects notes as PRs land (add a line there in your PR).
+- **Cutting a release** (maintainer): move *Unreleased* to a dated `## [x.y.z]` section, set
+  `VERSION`, commit `Release vx.y.z`, then `git tag vx.y.z && git push origin vx.y.z`. The
+  Release workflow runs the tests, checks the tag matches `VERSION`, and publishes the GitHub
+  Release with the changelog section plus the generated PR list.
+- **No packages.** JobScout is run from a clone (`git pull` to upgrade, or check out a tag);
+  there is no PyPI or container image, and none is planned until the config format settles.
+- Commits are authored by the person who made them. Do not add AI co-author trailers or
+  "generated with" lines; say in the PR text what tooling you used if it matters.
 
 ## Developing
 - `python server.py` → http://localhost:8765. A restart is needed after editing Python files.

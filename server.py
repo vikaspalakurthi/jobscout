@@ -845,6 +845,7 @@ def api_status():
             "SELECT COUNT(*) FROM jobs WHERE viewed_at IS NOT NULL "
             "AND status NOT IN ('hidden','not_interested')").fetchone()[0]
     return jsonify({
+        "version": app_version(),
         "refresh": {k: refresh_state[k] for k in
                     ("running", "message", "phase", "done", "total", "failed", "started", "trigger")},
         "home": {"city": fetchers.home()["city"], "state": fetchers.home()["state"],
@@ -869,6 +870,16 @@ def api_status():
 
 
 PRESETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "presets")
+
+
+def app_version():
+    """Contents of the VERSION file at the repo root ('dev' if missing)."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION"),
+                  encoding="utf-8") as f:
+            return f.read().strip() or "dev"
+    except OSError:
+        return "dev"
 
 
 def list_presets():

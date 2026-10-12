@@ -1,12 +1,19 @@
 # Upgrading
 
-JobScout is trunk-based: `main` is always runnable. Upgrading is a pull and a restart.
+JobScout is trunk-based: `main` is always runnable, and tagged releases (`v0.1.0`, …) mark
+points with a written changelog. Upgrading is a pull and a restart.
 
 ```bash
-git pull
+git pull                              # track main, or:
+git fetch --tags && git checkout v0.2.0   # pin a release
 pip install -r requirements.txt      # only changes occasionally
 python server.py
 ```
+
+The running version is in `GET /api/status` → `version` (the `VERSION` file). Release notes:
+[CHANGELOG.md](https://github.com/vikaspalakurthi/jobscout/blob/main/CHANGELOG.md) and the
+[Releases page](https://github.com/vikaspalakurthi/jobscout/releases). There are no packages
+to install or images to pull.
 
 - **Database migrations run automatically** on start (`db.init()`: idempotent `ALTER TABLE`
   plus any one-off data fixes). Your statuses, notes, plans and runs are never touched by a

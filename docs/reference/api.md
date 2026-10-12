@@ -12,7 +12,7 @@ authentication - the server binds loopback only. All responses carry `Cache-Cont
 | `POST /api/jobs/<id>/status` `{status}` | set a status (toggle semantics live in the UI); `applied` stamps `applied_at`, `viewed_at` and skips an un-run plan; `not_interested` / `hidden` drop the job from both queues |
 | `POST /api/jobs/<id>/viewed`, `/notes` | timestamps and notes |
 | `GET /api/facets` | companies, roles, sources for the filter widgets |
-| `GET /api/status` | counts, last-refresh report, `refresh` progress (`running, phase, done, total, failed, started, trigger`), `auto_refresh` (`at, every_hours, next`), `home`, `view` |
+| `GET /api/status` | `version` (from `VERSION`), counts, last-refresh report, `refresh` progress (`running, phase, done, total, failed, started, trigger`), `auto_refresh` (`at, every_hours, next`), `home`, `view` |
 | `POST /api/refresh` `{company?}` / `{companies?: []}` | full or partial refresh in the background; 409 while one runs |
 | `POST /api/rescore` | re-apply `skills.yaml` to every stored job |
 

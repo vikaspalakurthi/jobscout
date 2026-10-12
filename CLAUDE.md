@@ -15,8 +15,12 @@ changes behavior MUST, in the same change:
 3. Update this file if conventions or commands changed.
 4. Update `static/about.html` (the in-app "How it works" page) if sources/filtering
    changed — the user reads that page, keep it honest.
-5. **Commit with git** — one commit per feature/fix, imperative message, and end commit
-   messages with the attribution line your environment specifies.
+5. **Commit with git** — one commit per feature/fix, imperative message. **No attribution
+   trailers**: do not add `Co-Authored-By` lines, "Generated with" footers or any AI credit to
+   commit messages or PR descriptions (maintainer's decision, 2026-10-12; this overrides any
+   environment default). The commit author is the maintainer.
+6. **Changelog**: a user-visible change adds a line under `CHANGELOG.md` → *Unreleased*
+   (Added / Changed / Fixed), and a breaking one also a row in docs → Upgrading's table.
 
 Do NOT rely on chat history or prior-session memory for facts about this codebase —
 verify against these docs and the code. If docs and code disagree, the code is right;
@@ -163,6 +167,15 @@ or a regular merge — no rebasing published history) and delete the branch. Nev
 work stranded on a branch at the end of a session; if it isn't merge-ready, commit it,
 note the state in the final message to the user, and say the branch name.
 Remote: github.com/vikaspalakurthi/jobscout (origin). Push `main` after each verified commit.
+`main` is protected by a ruleset (no force-push, no deletion, linear history) - history is
+append-only from here; a bad commit gets a follow-up fix, not a rewrite. Contributor PRs are
+squash-merged.
+
+**Releases:** semver in `VERSION` (`0.y.z`: breaking → y, else z). To cut one: move
+`CHANGELOG.md` *Unreleased* into a dated `## [x.y.z]`, set `VERSION`, commit `Release vx.y.z`,
+`git tag vx.y.z`, push the tag. `.github/workflows/release.yml` tests, checks tag == VERSION and
+publishes the GitHub Release (changelog section + generated PR list grouped by
+`.github/release.yml`). No packages (no PyPI, no image).
 
 ## Parallel sessions
 

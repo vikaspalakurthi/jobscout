@@ -12,7 +12,7 @@ give while tailoring.
 It is built around one person's search (SRE / DevOps / observability roles, Austin TX or
 US-remote) and is honest about that — see [Who this is for](#who-this-is-for-today).
 
-![Python](https://img.shields.io/badge/python-3.11%2B-blue) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue) ![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Release](https://img.shields.io/github/v/release/vikaspalakurthi/jobscout?include_prereleases) ![CI](https://github.com/vikaspalakurthi/jobscout/actions/workflows/ci.yml/badge.svg)
 
 ---
 
@@ -141,9 +141,15 @@ Maintainer notes, also on the site under *Internals*:
 - [`CLAUDE.md`](CLAUDE.md) — conventions for AI coding sessions (the repo is built with them)
 
 ## Contributing
-Issues and PRs welcome — new board fetchers, classifier fixes, and the "make the home metro
-configurable" work are the best entry points. See [CONTRIBUTING.md](CONTRIBUTING.md); the
-[Code of Conduct](CODE_OF_CONDUCT.md) applies. Security concerns: [SECURITY.md](SECURITY.md).
+Issues and PRs welcome — role presets, new board fetchers and classifier fixes are the best
+entry points. See [CONTRIBUTING.md](CONTRIBUTING.md) (includes the branching and release
+process); the [Code of Conduct](CODE_OF_CONDUCT.md) applies. Security concerns:
+[SECURITY.md](SECURITY.md).
+
+## Releases
+Versioned releases are tags on `main` (`v0.1.0`, …) with notes in [CHANGELOG.md](CHANGELOG.md)
+and on the [Releases page](https://github.com/vikaspalakurthi/jobscout/releases). `main` is
+always runnable if you prefer to track it; see the docs site → Upgrading.
 
 ## License
 [MIT](LICENSE).

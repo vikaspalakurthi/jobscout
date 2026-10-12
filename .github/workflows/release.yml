@@ -1,0 +1,45 @@
+name: Release
+# A release is a vX.Y.Z tag on main. This job re-runs the tests, checks the tag matches the
+# VERSION file, and publishes a GitHub Release whose notes are the matching CHANGELOG.md
+# section followed by the auto-generated PR list (grouped by .github/release.yml).
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt pyflakes
+      - run: python -m pyflakes .
+      - run: python -m unittest discover -s tests
+      - name: Tag must match VERSION
+        run: |
+          v="$(tr -d '[:space:]' < VERSION)"
+          test "v$v" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != VERSION $v"; exit 1; }
+      - name: Changelog section for this version
+        run: |
+          python - "$GITHUB_REF_NAME" > notes.md <<'EOF'
+          import re, sys
+          sys.stdout.reconfigure(encoding="utf-8")
+          ver = sys.argv[1].lstrip("v")
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(r"^## \[%s\][^\n]*\n(.*?)(?=^## \[|\Z)" % re.escape(ver), text, re.S | re.M)
+          body = (m.group(1).strip() if m else "") or "_No changelog section for %s._" % ver
+          print(body)
+          EOF
+          cat notes.md
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "JobScout $GITHUB_REF_NAME" \
+            --notes-file notes.md --generate-notes

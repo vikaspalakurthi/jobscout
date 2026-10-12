@@ -27,12 +27,9 @@ webhook, overrides). A fresh clone starts empty: run a refresh, copy `templates/
 
 ## Next steps, in order
 
-1. **Make targeting configurable**: home metro / location classes (today Austin + Texas metros
-   + US-remote live in `fetchers.py`), role-family presets for `skills.yaml` and the fetch-time
-   relevance prefilter (`TITLE_RELEVANT`), and neutral work-authorization wording. This is the
-   gate to being useful for other roles and cities.
-2. **Docs site**: architecture, quickstart, usage, CLI, terminology (ATS, category 1/2/3,
-   keyword vs fit score), features, configuration, upgrades.
+1. ~~Make targeting configurable~~ - done 2026-10-12 (Settings → Home, role presets).
+2. ~~Docs site~~ - done 2026-10-12 (MkDocs Material on GitHub Pages). v0.1.0 tagged the same
+   day; `main` is protected and releases go through `.github/workflows/release.yml`.
 3. **Claude review bot**: the maintainer runs `/install-github-app` once to store
    `CLAUDE_CODE_OAUTH_TOKEN`; until then the review jobs skip.
 4. **Scheduled apply runs** from the desktop app (`/apply-queue` prefill in the morning,

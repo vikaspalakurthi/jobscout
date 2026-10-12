@@ -52,6 +52,32 @@ flowchart LR
 - Nothing personal in tracked files; `resume/`, `data/`, `config/local.yaml` stay ignored.
 - User statuses survive every refresh.
 
+## Branching and releases
+
+```mermaid
+gitGraph
+    commit id: "v0.1.0" tag: "v0.1.0"
+    branch feat/preset-data-eng
+    commit id: "preset + tests"
+    commit id: "docs"
+    checkout main
+    commit id: "fix: lever dates (squash)"
+    merge feat/preset-data-eng id: "preset (squash)"
+    commit id: "Release v0.2.0" tag: "v0.2.0"
+```
+
+- `main` is protected (no force-push, no deletion, linear history) and always runnable.
+- Work on a short-lived branch in your fork, open a PR, get it **squash-merged** - one PR, one
+  commit. Label it (`enhancement`, `bug`, `board`, `preset`, `documentation`): the labels group
+  the release notes.
+- Versions are semver `0.y.z`: breaking changes (anything in the
+  [upgrading table](operations/upgrading.md#breaking-changes-log)) bump `y`, everything else
+  bumps `z`. Add a line to `CHANGELOG.md` → *Unreleased* in your PR.
+- The maintainer cuts releases by tagging `main` (`vX.Y.Z`); the Release workflow runs the
+  tests, checks the tag against `VERSION`, and publishes the notes. There are no packages -
+  JobScout runs from a clone.
+- Commits are authored by the person who made them; no AI co-author trailers.
+
 ## Developing
 
 - `python server.py` (restart after Python edits); `JOBSCOUT_PORT=8766 python server.py` for a
