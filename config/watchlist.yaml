@@ -1,0 +1,68 @@
+# Manual watchlist: companies with NO public board API — JobScout cannot fetch them
+# directly. The Watchlist page renders this with careers-site + LinkedIn-search links.
+# Whether a company is covered by Adzuna company sweeps is computed live from settings.
+# When a company here becomes fetchable (they switch ATS), use "Add a company" on the
+# Companies page and remove it from this list.
+
+companies:
+  # ---- Big tech / Austin majors ----
+  - {name: Apple,          careers: "https://jobs.apple.com/en-us/search?location=austin-AST", platform: "own (API auth-gated)", austin: true}
+  - {name: Tesla,          careers: "https://www.tesla.com/careers/search", platform: "own (bot-blocked)", austin: true}
+  - {name: Google,         careers: "https://www.google.com/about/careers/applications/jobs/results?location=Austin%2C%20TX", platform: own, austin: true}
+  - {name: Meta,           careers: "https://www.metacareers.com/jobs", platform: own, austin: true}
+  - {name: Microsoft,      careers: "https://jobs.careers.microsoft.com/global/en/search", platform: "own (API retired)", austin: true}
+  - {name: IBM,            careers: "https://www.ibm.com/careers/search", platform: own, austin: true}
+  - {name: Indeed,         careers: "https://www.indeed.com/cmp/Indeed/jobs", platform: own, austin: true}
+  - {name: Arm,            careers: "https://careers.arm.com", platform: own, austin: true}
+  - {name: Broadcom,       careers: "https://www.broadcom.com/company/careers", platform: own, austin: true}
+  - {name: eBay,           careers: "https://careers.ebayinc.com", platform: own, austin: true}
+  - {name: PayPal,         careers: "https://careers.pypl.com", platform: own, austin: true}
+  - {name: Ericsson,       careers: "https://www.ericsson.com/en/careers", platform: own, austin: true}
+
+  # ---- Austin mid-size ----
+  - {name: Khoros,         careers: "https://khoros.com/careers", platform: own, austin: true}
+  - {name: The Zebra,      careers: "https://www.thezebra.com/careers/", platform: own, austin: true}
+  - {name: Planview,       careers: "https://www.planview.com/company/careers/", platform: own, austin: true}
+  - {name: Enverus,        careers: "https://www.enverus.com/careers/", platform: own, austin: true}
+  - {name: Cart.com,       careers: "https://cart.com/careers", platform: own, austin: true}
+  - {name: Workrise,       careers: "https://www.workrise.com/careers", platform: own, austin: true}
+  - {name: Grocery TV,     careers: "https://www.grocerytv.com/careers", platform: own, austin: true}
+  - {name: Iodine Software, careers: "https://iodinesoftware.com/careers/", platform: own, austin: true}
+
+  # ---- Infra companies elsewhere ----
+  - {name: Rapid7,         careers: "https://careers.rapid7.com", platform: own}
+  - {name: Aiven,          careers: "https://aiven.io/careers", platform: Teamtailor}
+  - {name: Retool,         careers: "https://retool.com/careers", platform: own}
+  - {name: Procore,        careers: "https://careers.procore.com", platform: own, austin: true}
+  - {name: Netdata,        careers: "https://www.netdata.cloud/careers/", platform: own}
+
+  # ---- Services / consultancies ----
+  - {name: Cognizant,      careers: "https://careers.cognizant.com", platform: Phenom}
+  - {name: HCLTech,        careers: "https://www.hcltech.com/careers", platform: own}
+  - {name: TCS,            careers: "https://www.tcs.com/careers", platform: iBegin}
+  - {name: Wipro,          careers: "https://careers.wipro.com", platform: Synergy}
+  - {name: Infosys,        careers: "https://www.infosys.com/careers/", platform: own}
+  - {name: Capgemini,      careers: "https://www.capgemini.com/careers/", platform: own}
+  - {name: Deloitte,       careers: "https://apply.deloitte.com", platform: Avature}
+  - {name: EY,             careers: "https://careers.ey.com", platform: SuccessFactors}
+  - {name: KPMG US,        careers: "https://www.kpmguscareers.com", platform: own}
+  - {name: PwC US,         careers: "https://jobs.us.pwc.com", platform: own}
+
+  # ---- Staffing / prime vendors (client reqs never hit public boards) ----
+  - {name: TEKsystems,     careers: "https://www.teksystems.com/en/search-jobs", platform: staffing}
+  - {name: Apex Systems,   careers: "https://www.apexsystems.com", platform: staffing}
+  - {name: Judge Group,    careers: "https://www.judge.com/jobs/", platform: staffing}
+  - {name: Insight Global, careers: "https://jobs.insightglobal.com", platform: staffing}
+  - {name: Kforce,         careers: "https://www.kforce.com/find-work/", platform: staffing}
+  - {name: Randstad US,    careers: "https://www.randstadusa.com/jobs/", platform: staffing}
+  - {name: ManpowerGroup,  careers: "https://www.manpower.com/en/jobs", platform: staffing}
+
+# Boards worth checking by hand (no APIs at all)
+  - {name: Chronosphere, careers: https://chronosphere.io/careers, platform: "JS-rendered page; no Greenhouse/Lever/Ashby/SmartRecruiters slug answers (2026-09-28)", austin: false}
+  - {name: twillio, careers: "", platform: "unknown", austin: false}   # added via app 2026-10-06
+
+boards:
+  - {name: Dice,            url: "https://www.dice.com/jobs?q=site%20reliability%20engineer&location=Austin%2C%20TX", note: "THE board for TX W2-contract/C2C infra roles; set up saved alerts"}
+  - {name: LinkedIn Jobs,   url: "https://www.linkedin.com/jobs/search/?keywords=site%20reliability%20engineer&location=Austin%2C%20Texas", note: "recruiter/staffing posts that exist nowhere else"}
+  - {name: Wellfound,       url: "https://wellfound.com/role/r/site-reliability-engineer", note: "startup roles"}
+  - {name: Built In Austin, url: "https://www.builtinaustin.com/jobs/dev-engineering", note: "Austin-local curation"}

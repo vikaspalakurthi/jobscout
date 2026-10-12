@@ -1,0 +1,95 @@
+# App settings. Restart the server after editing this file.
+
+adzuna:
+  # Register free at https://developer.adzuna.com (instant, no credit card).
+  # Paste your keys here, or set env vars ADZUNA_APP_ID / ADZUNA_APP_KEY instead.
+  enabled: true               # false = skip Adzuna on refresh (direct boards only)
+  app_id: ""
+  app_key: ""
+  country: us
+  # Adzuna's `what` requires ALL words to appear somewhere in the ad, so short/variant
+  # spellings need their own queries ("sre" won't be found by "site reliability engineer").
+  # Cost: each query = (locations + 1 remote sweep) API calls per refresh.
+  # 12 queries x 4 = 48 calls/refresh. Trim this list if you hit rate limits (HTTP 429).
+  queries:
+    - site reliability engineer
+    - sre
+    - devops engineer
+    - observability
+    - platform engineer
+    - kafka engineer
+    - kafka administrator
+    - elasticsearch engineer
+    - splunk engineer
+    - kubernetes engineer
+    - linux administrator
+    - systems administrator
+  locations: ["Austin, TX", "Dallas, TX", "Houston, TX"]
+  distance_km: 60
+  # Targeted company sweeps: companies with no public board API whose postings would
+  # otherwise get lost among the generic queries. One call per company per sweep title
+  # (12 x 4 = 48 calls/refresh on top of the ~48 generic-query calls — trim either list
+  # if you hit rate limits). Note: "AMD" is rejected by Adzuna's parser.
+  companies: [Apple, Dell, Microsoft, Tesla, Google, Meta, IBM, Cisco,
+              Charles Schwab, Samsung, Indeed, Dimensional]
+  company_sweep_titles: [reliability, devops, platform, administrator]
+  company_sweep_days: 60   # longer window — enterprise postings live for months
+  max_days_old: 30
+  results_per_page: 50
+  pages_per_query: 1        # keep low: free tier is ~1000 calls/month
+
+filters:
+  max_age_days: 45          # drop aggregator posts older than this (when age is known)
+  max_age_days_boards: 60   # same for direct company boards (evergreen reqs); also hides older rows from the Inbox
+  keep_texas_non_austin: true
+  keep_us_other_cities: false   # onsite-only jobs in other US cities are dropped
+  keep_remote_global: false     # remote jobs without a clear US signal are dropped
+
+server:
+  port: 8765
+
+refresh:
+  at: "06:00, 11:00, 18:00, 23:00"   # clock times (PC local) the running server refreshes all sources; "" = off
+  every_hours: 0            # fallback when `at` is empty: >0 = refresh this often (0 = manual only)
+  board_workers: 8          # company boards fetched in parallel (each board is independent HTTP)
+
+resume:                       # resume tailoring via the tailor-resume Claude Code skill
+  output_dir: resume/output   # <Company>/<Role-slug>/<jobId>/<file_name> (relative = repo root)
+  file_name: Tailored_Resume.docx   # your name here; the Settings page saves it to local.yaml
+  claude_cmd: claude          # or full path to claude.exe
+  model: claude-fable-5-1     # passed as --model to both phases
+  timeout_min: 10             # per phase
+  batch_max: 50               # max jobs per "Tailor resumes" click (safety cap; ~3 min of Claude per job)
+  parallel: 2                 # concurrent claude -p runs (1-3); live-adjustable in the Resumes tab
+
+fit:                          # model fit score beside the keyword score (fit.py; claude -p, no API key)
+  enabled: true               # score gated new jobs after every refresh
+  model: claude-haiku-4-5     # cheap scorer; batches of `batch` jobs per call
+  profile_model: claude-sonnet-5   # rewrites resume/fit-profile.md from your feedback (rare)
+  thinking: full              # full | small | off  (~90 s | ~45 s | ~30 s per batch of 10)
+  batch: 10
+  parallel: 2
+  gate_min_score: 60          # keyword score a job needs before the model looks at it
+  max_per_run: 300            # cap per start/refresh
+  auto_profile_after: 5       # pending feedback items that trigger a profile update (0 = manual)
+  timeout_min: 8
+  description_chars: 1800
+
+notify:                       # new-job digest after every refresh
+  enabled: false
+  discord_webhook_url: ""     # set on the Settings page -> stored in config/local.yaml (never commit)
+  min_score: 50               # only new jobs at or above this score are listed
+  max_items: 15               # lines per Discord message (rest: "more in JobScout")
+  loc_classes: [austin, texas, remote_us]
+
+apply:                        # apply pipeline (apply.py) - independent of the tailoring pipeline
+  auto_plan: false            # build an application plan automatically when a resume becomes ready
+  mode: prefill               # default per plan: prefill = filled tabs in your window, you click Submit;
+                              # unattended = submit approved plans on schedule (exact-match guard).
+                              # Each plan can override this from its review card.
+  window: "06:00-06:30"       # prefill window (local time), used by the scheduled task
+  allowed_ats: [greenhouse, ashby, lever]   # boards eligible for unattended submit
+  profile: resume/profile.yaml
+  unattended_enabled: true    # master switch: false = every queued plan is filled in prefill mode
+  max_per_run: 5              # forms one /apply-queue run may fill
+  pause_seconds: 20           # pause between forms in a run

@@ -1,0 +1,137 @@
+# Scoring configuration. Edit freely, then hit "Rescore" in the dashboard —
+# no refetch needed. Scores are clamped to 0–100.
+#
+# How a job is scored:
+#   title points (best matching role_titles entry, max ~30)
+# + seniority bonus (title)
+# + skills found in the description (capped at skills.cap_points)
+# + location points
+# + experience-fit bonus
+# - title_penalties, flag penalties
+# A title matching any title_blockers pattern scores 0 and is tagged "blocked".
+
+role_titles:
+  # SRE-family titles the user counts as SRE (systems/service/platform reliability, production engineer)
+  - {match: 'site reliability|\bsre\b|(systems?|service|application|platform|network|security|data) reliability engineer|production engineer', label: SRE, points: 30}
+  - {match: 'observability',                               label: Observability,  points: 30}
+  - {match: '\bkafka\b|streaming platform|event streaming',label: Kafka,          points: 30}
+  - {match: 'elastic(search)?|\belk\b|opensearch',         label: Elastic,        points: 30}
+  - {match: 'devops|dev ops',                              label: DevOps,         points: 28}
+  - {match: 'platform (engineer|engineering|infrastructure|operations)', label: Platform, points: 27}
+  - {match: 'reliability',                                 label: Reliability,    points: 25}
+  - {match: 'infrastructure',                              label: Infra,          points: 24}
+  - {match: 'monitoring|telemetry|logging',                label: Monitoring,     points: 24}
+  - {match: 'cloud (engineer|operations|infrastructure)',  label: Cloud,          points: 22}
+  - {match: 'database reliability|data platform',          label: DataPlatform,   points: 20}
+  - {match: 'systems engineer|linux (engineer|admin)',     label: Systems,        points: 18}
+  - {match: '\badmin(istrator)?\b|\bdba\b',                label: Admin,          points: 24}
+  - {match: 'incident|noc\b',                              label: Incident,       points: 16}
+
+title_blockers:
+  - 'intern\b|internship|new grad|entry.level|\bjunior\b'
+  - 'director|\bvp\b|vice president|head of|chief '
+  - 'front.?end|mobile engineer|\bios\b|android|ui engineer|web developer'
+  - '\bsales\b|marketing|recruiter|account (executive|manager)|customer success'
+  # hardware / manufacturing "reliability" is not SRE (SpaceX, Samsung, AMD, SAIC boards)
+  - 'hardware reliability|product (quality )?(&|and )?reliability|equipment reliability|quality (&|and) reliability|solar cell|spacecraft|electrical engineer|mechanical engineer|manufacturing|reliability (test|technician|specialist)|supplier development|packaging reliability|power system engineer'
+  - 'data scientist|\bml engineer\b|machine learning engineer'
+
+title_penalties:
+  - {match: 'manager', points: -10}     # keeps SRE-manager roles visible but lower
+  # Product-development roles (building the software itself) rank below platform/admin/ops.
+  # `unless`: the penalty is skipped when the title also has ops context.
+  - {match: '(java|c\+\+|rust|golang|scala|\bnode\b|backend|full.?stack) (engineer|developer)',
+     points: -15}
+  - {match: 'software (engineer|developer)',
+     unless: 'sre|reliab|devops|platform|observab|monitoring|telemetry|\bops\b|\badmin|production|infra',
+     points: -12}
+
+seniority_bonus:
+  - {match: 'senior|staff|principal|\blead\b|\bsr\.?\b', points: 6}
+
+skills:
+  cap_points: 40
+  # Each group scores `points` when any term matches, +1 per extra distinct term (max +3).
+  groups:
+    - name: Elastic stack
+      points: 9
+      terms: [elasticsearch, elastic stack, elk, opensearch, logstash, kibana, beats, elastic cloud]
+    - name: Kafka
+      points: 9
+      terms: [kafka, confluent, kafka connect, ksqldb, schema registry, msk, redpanda, kraft, event streaming]
+    - name: Observability
+      points: 6
+      terms: [observability, prometheus, grafana, opentelemetry, otel, datadog, splunk, new relic, loki, jaeger, distributed tracing, slo, sli, error budget, pagerduty]
+    - name: Platform & IaC
+      points: 5
+      terms: [kubernetes, k8s, terraform, ansible, helm, docker, argocd, gitops, ci/cd, jenkins, github actions, puppet, chef]
+    - name: Cloud
+      points: 4
+      terms: [aws, gcp, google cloud, azure, eks, gke, ec2, s3, lambda]
+    - name: Languages
+      points: 3
+      terms: [python, golang, bash, shell scripting]
+    - name: Adjacent data infra
+      points: 3
+      terms: [redis, cassandra, rabbitmq, flink, spark, airflow, zookeeper, postgres, mysql, clickhouse]
+
+freshness_bonus:      # from posting date — favors recent listings (first match wins)
+  - {within_days: 7,  points: 6}
+  - {within_days: 14, points: 4}
+  - {within_days: 30, points: 2}
+
+source_points:        # direct company boards rank slightly above aggregator echoes
+  direct: 3
+  aggregator: 0
+
+location_points:
+  austin: 15
+  texas: 8
+  remote_us: 12
+  remote_global: 10
+  us_other: -10
+  non_us: -50
+  unknown: 0
+
+experience_bonus:
+  # matched against description; rewards senior-level expectations (you have 10+ yrs)
+  - {match: '(8|9|10|12|15)\+?\s*(?:\+|plus)?\s*years', points: 4}
+
+flags:
+  citizenship:
+    points: -60
+    label: "Citizenship/clearance required"
+    terms: [security clearance, ts/sci, top secret, us citizenship required, u.s. citizenship required,
+            must be a us citizen, must be a u.s. citizen, citizenship is required, polygraph, public trust clearance]
+    # patterns: regexes (matched against lowercased title+description) for phrasings with too
+    # many variants for literal terms — "Be a US Citizen", "must be U.S. citizens", "US citizens
+    # only", "US Citizen or Green Card holder", "requires U.S. citizenship or Green Card"
+    # (GC-only also excludes work-authorized non-residents). Each needs a
+    # requirement verb/qualifier so EEO lists ("...national origin, citizenship, age...") never hit.
+    patterns:
+      - '\bbe (?:an? )?(?:us|u\.s\.|united states) (?:citizens?|persons?)\b'
+      - '\b(?:us|u\.s\.) citizens? only\b'
+      - '\bonly (?:us|u\.s\.) citizens\b'
+      - '\bwho are (?:us|u\.s\.) citizens\b'
+      - '\b(?:us|u\.s\.) citizen(?:s|ship)? (?:or|and|/) (?:(?:us|u\.s\.) )?(?:green card|permanent resident|lawful permanent)'
+    # ignore: matches within ~120 chars of these patterns don't count (boilerplate)
+    ignore: [polygraph protection act, eppa]
+  itar:
+    points: -40
+    label: "ITAR / US-persons restriction"
+    terms: [itar, u.s. person, us persons]
+  export_notice:
+    # Generic export-control boilerplate; deemed-export rules rarely block hires but worth seeing.
+    points: -3
+    label: "Export-control notice"
+    terms: [export control, export administration regulations, deemed export]
+  no_sponsorship:
+    # For a candidate who needs no sponsorship this is a small note, not a rejection.
+    points: -3
+    label: "Says no sponsorship (OK if you need none)"
+    terms: [no sponsorship, unable to sponsor, not able to sponsor, cannot sponsor, will not sponsor,
+            without sponsorship, sponsorship is not available, not offer sponsorship]
+  contract:
+    points: 0
+    label: "Contract role"
+    terms: [contract position, contract role, c2c, corp to corp, corp-to-corp, "1099", w2 contract, contract-to-hire, contract to hire]

@@ -1,0 +1,5 @@
+# Review requests default to the maintainer. The filler and tailoring skills carry the
+# safety guarantees, so changes there always need a maintainer's eyes.
+*                               @vikaspalakurthi
+/.claude/skills/apply-queue/    @vikaspalakurthi
+/apply.py                       @vikaspalakurthi

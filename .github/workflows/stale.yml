@@ -1,0 +1,28 @@
+name: Stale issues and PRs
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          days-before-stale: 45
+          days-before-close: 14
+          stale-issue-label: stale
+          stale-pr-label: stale
+          exempt-issue-labels: pinned,roadmap,good first issue
+          exempt-pr-labels: pinned
+          stale-issue-message: >
+            No activity for 45 days. If this is still relevant, a comment keeps it open;
+            otherwise it closes in two weeks.
+          stale-pr-message: >
+            No activity for 45 days. Rebase or comment to keep it open; otherwise it closes
+            in two weeks.

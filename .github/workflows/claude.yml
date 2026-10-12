@@ -1,0 +1,57 @@
+# Claude Code review bot. Reviews every PR and answers @claude mentions in issues/PRs.
+# Runs on the maintainer's Claude subscription: set the CLAUDE_CODE_OAUTH_TOKEN secret by running
+# `/install-github-app` in an interactive `claude` session (it installs the app and stores the
+# token). Until that secret exists, these jobs skip cleanly.
+name: Claude review
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  review:
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: anthropics/claude-code-action@v1
+        continue-on-error: true
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Review this pull request for JobScout. Read CLAUDE.md and CONTRIBUTING.md first.
+            Check, in this order: (1) the three-category source rule - reject anything that
+            scrapes LinkedIn/Indeed, bypasses bot protection, automates logins or captchas;
+            (2) no personal data or secrets in the diff; (3) user statuses still survive
+            refreshes and the filler still never submits a form that differs from the approved
+            plan; (4) docs updated in the same PR where behaviour changed; (5) correctness.
+            Leave concise inline comments only where something is wrong or risky, and one
+            summary comment. Do not restyle code.
+          claude_args: "--max-turns 25"
+
+  mention:
+    if: >
+      (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment')
+      && contains(github.event.comment.body, '@claude')
+      || (github.event_name == 'issues' && contains(github.event.issue.body, '@claude'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: anthropics/claude-code-action@v1
+        continue-on-error: true
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: "--max-turns 25"

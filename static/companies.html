@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JobScout — Companies</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="row">
+    <h1>Job<span>Scout</span></h1>
+    <nav>
+      <a href="/">Jobs</a>
+      <a href="/companies" class="active">Companies</a>
+      <a href="/watchlist">Watchlist</a>
+      <a href="/settings">Settings</a>
+      <a href="/about">How it works</a>
+    </nav>
+    <span class="stat" id="stat-line"></span>
+    <span style="flex:1"></span>
+    <span class="refresh-msg" id="refresh-msg"></span>
+  </div>
+</header>
+
+<main>
+  <div class="form-card" style="max-width:none">
+    <h2>Add a company</h2>
+    <p class="help">Checks every platform JobScout can fetch directly — Greenhouse, Lever,
+    Ashby, SmartRecruiters, Recruitee, Workable, BambooHR, Breezy, then Workday (Workday
+    discovery is the slow part; a full check can take 1&ndash;2 minutes). If nothing is
+    found, the company has no public board API and Adzuna sweeps are the channel.</p>
+    <div class="form-row">
+      <input type="text" id="add-name" placeholder="Company name&hellip;" style="flex:1;min-width:200px">
+      <input type="text" id="add-url" placeholder="Careers page URL (optional: finds Workday / Oracle HCM / Phenom / iCIMS)" style="flex:2;min-width:260px">
+      <button class="primary" id="btn-detect">Check availability</button>
+      <span class="status-line" id="detect-status"></span>
+    </div>
+    <div id="detect-result" style="display:none" class="form-row"></div>
+  </div>
+
+  <p class="help">Companies ranked by relevant jobs found, cumulative over time. Direct-board
+  companies come from <span class="mono">config/companies.yaml</span>; the rest arrived via
+  aggregators. "Last fetch" shows how each board did on the most recent refresh — hit
+  <b>&#8635;</b> to re-fetch just that company. Click any header to sort.</p>
+  <div class="filters" style="padding:8px 0">
+    <input type="text" id="cf-q" placeholder="Filter companies&hellip;">
+    <select id="cf-ats">
+      <option value="">All boards</option>
+      <option>greenhouse</option><option>lever</option><option>ashby</option>
+      <option>smartrecruiters</option><option>workday</option><option>recruitee</option>
+      <option>workable</option><option>bamboohr</option><option>breezy</option>
+      <option value="aggregators">via aggregators only</option>
+    </select>
+    <label><input type="checkbox" id="cf-refresh"> Refresh-capable only</label>
+    <label><input type="checkbox" id="cf-active"> With active jobs</label>
+  </div>
+  <table class="grid" id="grid">
+    <thead><tr>
+      <th data-key="name" data-type="text">Company</th>
+      <th class="num" data-key="total" data-type="num">Jobs found (all time)</th>
+      <th class="num" data-key="active" data-type="num">Active</th>
+      <th class="num" data-key="applied" data-type="num">Applied</th>
+      <th class="num" data-key="best_score" data-type="num">Best score</th>
+      <th data-key="board" data-type="text">Board</th>
+      <th data-key="last_kept" data-type="num">Last fetch</th>
+      <th data-key="since" data-type="text">Tracked since</th>
+      <th data-key="refreshable" data-type="num">Refresh</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+</main>
+
+<script>
+const esc = s => (s ?? '').toString().replace(/[&<>"]/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const msg = document.getElementById('refresh-msg');
+let allRows = [];
+let sortState = { key: 'total', dir: -1 };   // default: jobs found, descending
+
+const ROW_CAP = 300;          // rows painted per render; 1,300+ rows re-laid-out per keystroke froze the tab
+let showAll = false;
+
+function passesFilters(c) {
+  const q = document.getElementById('cf-q').value.trim().toLowerCase();
+  if (q && !c.lname.includes(q)) return false;
+  const ats = document.getElementById('cf-ats').value;
+  if (ats === 'aggregators' && c.board !== 'via aggregators') return false;
+  if (ats && ats !== 'aggregators' && !c.board.startsWith(ats + ':')) return false;
+  if (document.getElementById('cf-refresh').checked && c.board === 'via aggregators') return false;
+  if (document.getElementById('cf-active').checked && !c.active) return false;
+  return true;
+}
+
+function render() {
+  const { key, dir } = sortState;
+  const type = document.querySelector(`th[data-key="${key}"]`)?.dataset.type || 'text';
+  const rows = allRows.filter(passesFilters).sort((a, b) => {
+    let va = a[key], vb = b[key];
+    if (type === 'num') { va = va ?? -1; vb = vb ?? -1; return (va - vb) * dir; }
+    return String(va ?? '').localeCompare(String(vb ?? '')) * dir;
+  });
+  document.querySelectorAll('th[data-key]').forEach(th => {
+    th.textContent = th.textContent.replace(/ [▲▼]$/, '');
+    if (th.dataset.key === key) th.textContent += dir === 1 ? ' ▲' : ' ▼';
+  });
+  const shown = showAll ? rows : rows.slice(0, ROW_CAP);
+  document.getElementById('stat-line').innerHTML =
+    `${rows.length} companies · ${rows.reduce((a, c) => a + c.total, 0)} jobs found all-time` +
+    (shown.length < rows.length
+      ? ` · showing the first ${shown.length} <a href="#" id="show-all">show all ${rows.length}</a>` : '');
+  const sa = document.getElementById('show-all');
+  if (sa) sa.onclick = e => { e.preventDefault(); showAll = true; render(); };
+  document.querySelector('#grid tbody').innerHTML = shown.map(c => {
+    let last = '—';
+    if (c.last_error) last = `<span class="badge-err" title="${esc(c.last_error)}">failed</span>`;
+    else if (c.last_kept != null) last = `<span class="badge-ok">${c.last_kept} kept</span>`;
+    const canRefresh = c.board !== 'via aggregators';
+    return `<tr>
+      <td><b>${esc(c.name)}</b></td>
+      <td class="num">${c.total}</td>
+      <td class="num">${c.active}</td>
+      <td class="num">${c.applied}</td>
+      <td class="num">${c.best_score != null ? Math.round(c.best_score) : '—'}</td>
+      <td class="mono">${esc(c.board)}</td>
+      <td>${last}</td>
+      <td class="mono">${esc(c.since) || '—'}</td>
+      <td>${canRefresh ? `<button class="small" data-company="${esc(c.name)}" title="Refresh this board only">&#8635;</button>` : ''}</td>
+    </tr>`;
+  }).join('');
+}
+// one delegated handler instead of a listener per row
+document.querySelector('#grid tbody').onclick = e => {
+  const btn = e.target.closest('button[data-company]');
+  if (btn) refreshCompany(btn.dataset.company);
+};
+
+async function load() {
+  const data = await (await fetch('/api/companies')).json();
+  allRows = data.companies;
+  allRows.forEach(c => { c.refreshable = c.board !== 'via aggregators' ? 1 : 0; c.lname = c.name.toLowerCase(); });
+  render();
+}
+
+let typeTimer = null;
+document.getElementById('cf-q').oninput = () => {     // debounced: render once typing pauses
+  clearTimeout(typeTimer);
+  typeTimer = setTimeout(() => { showAll = false; render(); }, 150);
+};
+['cf-ats', 'cf-refresh', 'cf-active'].forEach(id => document.getElementById(id).onchange = () => { showAll = false; render(); });
+
+// ---- Add a company (in-app detect) ----
+const dStatus = document.getElementById('detect-status');
+const dResult = document.getElementById('detect-result');
+
+document.getElementById('btn-detect').onclick = async () => {
+  const name = document.getElementById('add-name').value.trim();
+  const url = document.getElementById('add-url').value.trim();
+  if (!name) { dStatus.textContent = 'Type a company name first' + (url ? ' (the URL alone is not enough - the name labels the jobs).' : '.'); return; }
+  document.getElementById('btn-detect').disabled = true;
+  dResult.style.display = 'none';
+  dStatus.textContent = 'Checking… (Workday discovery can take 1–2 minutes)';
+  try {
+    const r = await (await fetch('/api/companies/detect', { method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name, url}) })).json();
+    dStatus.textContent = '';
+    dResult.style.display = 'flex';
+    if (r.already_configured) {
+      dResult.innerHTML = `<span class="badge-ok">${esc(name)} is already configured</span>
+        <span class="mono">${esc(r.ats)}:${esc(r.slug)}</span>`;
+    } else if (r.found) {
+      dResult.innerHTML = `<span class="badge-ok">Found on <b>${esc(r.ats)}</b></span>
+        <span class="mono">${esc(r.slug)}</span> <span class="help">${r.postings} postings on the board</span>
+        <button class="primary" id="btn-add">Add to JobScout</button>`;
+      document.getElementById('btn-add').onclick = async () => {
+        const a = await (await fetch('/api/companies/add', { method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({name, ats: r.ats, slug: r.slug}) })).json();
+        if (!a.ok) { dResult.innerHTML = `<span class="badge-err">${esc(a.error)}</span>`; return; }
+        dResult.innerHTML = `<span class="badge-ok">Added.</span> Fetching its board now…`;
+        await fetch('/api/refresh', { method: 'POST',
+          headers: {'Content-Type': 'application/json'}, body: JSON.stringify({company: name}) });
+        const poll = setInterval(async () => {
+          const s = await (await fetch('/api/status')).json();
+          if (!s.refresh.running) {
+            clearInterval(poll);
+            dResult.innerHTML = `<span class="badge-ok">${esc(name)} added and fetched.</span>`;
+            load();
+          }
+        }, 1500);
+      };
+    } else {
+      dResult.innerHTML = `<span class="badge-err">No public board found</span>
+        <span class="help">${r.note ? esc(r.note) + '. ' : ''}${url ? '' : 'Paste the careers page URL above to fingerprint the platform (Workday / Oracle HCM / Phenom / iCIMS). '}Otherwise Adzuna is the channel.</span>` +
+        (r.in_adzuna_sweeps
+          ? `<span class="badge-ok">Already in Adzuna company sweeps.</span>`
+          : `<button id="btn-sweep">Add to Adzuna company sweeps</button>`) +
+        `<button id="btn-watch" title="Keep it on the Watchlist page for manual checking (config/watchlist.yaml)">Add to watchlist</button>`;
+      const b = document.getElementById('btn-sweep');
+      if (b) b.onclick = async () => {
+        const a = await (await fetch('/api/companies/add_sweep', { method: 'POST',
+          headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name}) })).json();
+        b.outerHTML = a.ok
+          ? `<span class="badge-ok">Added to Adzuna sweeps — picked up on the next Refresh.</span>`
+          : `<span class="badge-err">${esc(a.error)}</span>`;
+      };
+      const w = document.getElementById('btn-watch');
+      w.onclick = async () => {
+        const a = await (await fetch('/api/companies/add_watch', { method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({name, url, platform: r.note || ''}) })).json();
+        w.outerHTML = a.ok
+          ? `<span class="badge-ok">${a.already ? 'Already on the' : 'Added to the'} <a href="/watchlist">watchlist</a>.</span>`
+          : `<span class="badge-err">${esc(a.error)}</span>`;
+      };
+    }
+  } catch (e) {
+    dStatus.textContent = 'Check failed: ' + e;
+  }
+  document.getElementById('btn-detect').disabled = false;
+};
+
+document.querySelectorAll('th[data-key]').forEach(th => {
+  th.style.cursor = 'pointer';
+  th.onclick = () => {
+    const key = th.dataset.key;
+    if (sortState.key === key) sortState.dir *= -1;
+    else sortState = { key, dir: th.dataset.type === 'num' ? -1 : 1 };
+    render();
+  };
+});
+
+async function refreshCompany(name) {
+  const r = await fetch('/api/refresh', { method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify({company: name}) });
+  if (r.status === 409) { msg.textContent = 'A refresh is already running — wait for it to finish.'; return; }
+  document.querySelectorAll('button[data-company]').forEach(b => b.disabled = true);
+  msg.textContent = `Refreshing ${name}…`;
+  const poll = setInterval(async () => {
+    const s = await (await fetch('/api/status')).json();
+    msg.textContent = s.refresh.message;
+    if (!s.refresh.running) {
+      clearInterval(poll);
+      await load();
+      setTimeout(() => { msg.textContent = ''; }, 5000);
+    }
+  }, 1500);
+}
+
+load();
+</script>
+</body>
+</html>

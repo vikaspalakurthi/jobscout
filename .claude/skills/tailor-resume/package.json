@@ -1,0 +1,8 @@
+{
+  "name": "tailor-resume",
+  "private": true,
+  "description": "DOCX generator dependency for the tailor-resume skill",
+  "dependencies": {
+    "docx": "^9.9.0"
+  }
+}

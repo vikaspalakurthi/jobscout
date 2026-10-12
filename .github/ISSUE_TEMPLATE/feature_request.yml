@@ -1,0 +1,22 @@
+name: Feature request
+description: Propose a change or addition
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is awkward or missing today, in terms of your job search.
+    validations: { required: true }
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What you'd like to see. Sketches of UI or config welcome.
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Ground rules
+      options:
+        - label: This does not involve scraping LinkedIn/Indeed, bypassing bot protection, automating logins, or solving captchas.
+          required: true
