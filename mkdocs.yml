@@ -1,0 +1,72 @@
+site_name: JobScout
+site_description: Local job-search engine - aggregate, score, tailor, apply, all on your machine.
+site_url: https://vikaspalakurthi.github.io/jobscout/
+repo_url: https://github.com/vikaspalakurthi/jobscout
+repo_name: vikaspalakurthi/jobscout
+edit_uri: edit/main/docs/
+copyright: MIT licensed.
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - content.code.copy
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle: { icon: material/brightness-7, name: Dark mode }
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle: { icon: material/brightness-4, name: Light mode }
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc: { permalink: true }
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed: { alternate_style: true }
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Installation: getting-started/installation.md
+      - Quickstart: getting-started/quickstart.md
+      - Make it yours: getting-started/make-it-yours.md
+  - Concepts:
+      - Terminology: concepts/terminology.md
+      - Architecture: concepts/architecture.md
+      - Sources and the three categories: concepts/sources.md
+      - Scoring and fit: concepts/scoring.md
+  - User guide:
+      - Jobs page: guide/jobs.md
+      - Companies and Watchlist: guide/companies.md
+      - Resume tailoring: guide/tailoring.md
+      - Applying: guide/applying.md
+      - Schedule and notifications: guide/schedule-and-notifications.md
+  - Reference:
+      - Configuration: reference/configuration.md
+      - Role presets: reference/presets.md
+      - Command line: reference/cli.md
+      - HTTP API: reference/api.md
+  - Operations:
+      - Upgrading: operations/upgrading.md
+      - Troubleshooting: operations/troubleshooting.md
+      - Privacy and safety: operations/privacy-and-safety.md
+  - Contributing: contributing.md
+  - Internals:
+      - Architecture notes: ARCHITECTURE.md
+      - Learnings (board and form quirks): LEARNINGS.md
+      - Status: STATUS.md

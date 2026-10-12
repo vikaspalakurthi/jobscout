@@ -7,3 +7,6 @@ resume/
 
 # tailor-resume skill: personal fact files live in resume/ (ignored above); skill's npm deps
 node_modules/
+
+# MkDocs build output (GitHub Pages builds it in CI)
+site/
