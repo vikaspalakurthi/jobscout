@@ -4,14 +4,31 @@
     {
       "name": "jobscout",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["server.py"],
+      "runtimeArgs": [
+        "server.py"
+      ],
       "port": 8765
     },
     {
       "name": "jobscout-8766",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-c", "import os, runpy; os.environ['JOBSCOUT_PORT']='8766'; runpy.run_path('server.py', run_name='__main__')"],
+      "runtimeArgs": [
+        "-c",
+        "import os, runpy; os.environ['JOBSCOUT_PORT']='8766'; runpy.run_path('server.py', run_name='__main__')"
+      ],
       "port": 8766
+    },
+    {
+      "name": "jobscout-docs",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "mkdocs",
+        "serve",
+        "-a",
+        "127.0.0.1:8001"
+      ],
+      "port": 8001
     }
   ]
 }

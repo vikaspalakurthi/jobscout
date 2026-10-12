@@ -1,7 +1,48 @@
 # JobScout architecture
 
 Local Flask app. One SQLite DB. No build step, no external services except the job
-APIs themselves. Single user (the author), single machine.
+APIs themselves and the user's own Claude subscription. Single user, single machine.
+
+Maintainer-level notes. The diagrams here (Mermaid; GitHub and the docs site render them)
+show the *mechanics*; the user-facing system view and the refresh sequence live on the docs
+site under [Concepts → Architecture](concepts/architecture.md).
+
+```mermaid
+flowchart LR
+    subgraph sources [Sources]
+        B[(~530 company boards<br/>companies.yaml)]
+        A[(Aggregators<br/>Adzuna · Remotive · RemoteOK · Muse · HN)]
+    end
+    subgraph proc ["server.py process"]
+        F[fetchers.py]
+        S[scoring.py]
+        FI[fit.py]
+        T[tailor.py]
+        AP[apply.py]
+        N[notify.py]
+        DB[(data/jobs.db)]
+    end
+    subgraph local [Outside the process]
+        UI[static/*.html]
+        R[resume/ fact files]
+        C[claude -p]
+        SK[apply-queue skill<br/>Claude in Chrome]
+    end
+    B --> F
+    A --> F
+    F -->|upsert_jobs| DB
+    S -->|score, flags, loc_class| DB
+    FI -->|fit, reason, gaps| DB
+    FI <--> C
+    T <--> C
+    T --> R
+    R --> FI
+    R --> AP
+    AP --> DB
+    N --> Discord
+    UI <-->|/api/*| DB
+    SK <-->|/api/apply/queue| DB
+```
 
 ## Sources: three categories of employer (read this before adding a fetcher)
 
@@ -27,6 +68,20 @@ Each category-2 fetcher: search each `BIGBOARD_TERMS` term, keep `TITLE_RELEVANT
 `SOURCE_PRIORITY` (priority 0, like the other boards).
 
 ## Data flow
+
+```mermaid
+flowchart TD
+    R["run_all: boards in a thread pool, then big-tech fetchers, then aggregators"] --> N["_norm: classify location, work mode, employment"]
+    N --> P{is_relevant?<br/>title regex OR desc rescue}
+    P -- no --> X1[dropped]
+    P -- yes --> L{_keep_location?<br/>filters config}
+    L -- no --> X2[dropped]
+    L -- yes --> U[db.upsert_jobs<br/>job fields only, statuses untouched]
+    U --> RS[scoring.rescore_all<br/>score · breakdown · flags · role · loc_class heal]
+    RS --> NO[notify.after_refresh new_ids]
+    RS --> FA[fit.after_refresh new_ids → gated queue]
+    FA --> UI["/api/jobs"]
+```
 
 ```
 fetchers.run_all()                    server.py /api/refresh (background thread)
@@ -120,6 +175,26 @@ work_auth is derived from flags at rescore time. Freshness/source need
 The keyword score cannot tell "SRE who runs Kafka" from "Kafka internals expert"; it is kept
 as a cheap **prefilter and fallback**, and `fit` (0–100) is the number the UI sorts and
 filters on when present (`sort=fit`; the min-score slider is `COALESCE(fit, score)`).
+
+```mermaid
+sequenceDiagram
+    participant J as jobs (gated)
+    participant W as fit worker
+    participant C as claude -p (fit.model)
+    participant P as resume/fit-profile.md
+    participant U as user (thumbs)
+    participant S as claude -p (fit.profile_model)
+    W->>J: take batch of 10 (fit_state=scoring)
+    W->>C: prompt on stdin: profile + inventory + jobs
+    C-->>W: strict JSON {id, fit, reason, gaps}
+    W->>J: fit, fit_reason, fit_gaps, fit_version
+    U->>J: too_high / too_low / right (+ note)
+    Note over J: fit_feedback rows accumulate
+    J->>S: after 5 pending (or "Update profile now")
+    S->>P: rewrite "## Learned adjustments" (backup kept)
+    P-->>J: profile version bumps → scored jobs are stale
+    J->>W: start() re-queues gated jobs
+```
 
 - **Inputs** (all in gitignored `resume/`, sent only through the user's own subscription via
   `claude -p`, prompt on stdin): `fit-profile.md` (judgement rules — created with a default
@@ -273,6 +348,11 @@ active (15s idle) and re-renders cards whose state changed.
   API on a temp DB). CI (`.github/workflows/ci.yml`) runs it with pyflakes on Linux and Windows.
 - Cover-letter DOCX names derive from `resume.file_name` (`tailor.cover_files()`); nothing in
   tracked code carries a person's name.
+- **Versioning**: `VERSION` (semver, surfaced as `/api/status.version`) and `CHANGELOG.md`
+  (Keep a Changelog). A release is a `vX.Y.Z` tag on `main`; `.github/workflows/release.yml`
+  runs the tests, checks the tag matches `VERSION`, and publishes a GitHub Release whose notes
+  are the changelog section plus the auto-generated PR list (`.github/release.yml` groups them
+  by label). There are no packages - users run from a clone, see docs → Upgrading.
 
 ## Config precedence
 
@@ -289,6 +369,20 @@ pipeline" artifact (Sep 2026); decisions below are the contract.
 enqueue(job_ids, task)  ->  ordered queue drained by N worker threads (resume.parallel, 1-3)
    queued -> analyzing --(unknown skills)--> needs_answers --(user answers)--> queued
                        --(nothing unknown)-> generating -> ready | failed
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> queued: enqueue / Tailor
+    queued --> analyzing: worker takes it
+    analyzing --> needs_answers: skill asks questions
+    needs_answers --> queued: user answers (inventory.py records "also remember")
+    analyzing --> generating: nothing unknown
+    generating --> ready: DOCX + cover + Q&A written
+    analyzing --> failed
+    generating --> failed
+    failed --> queued: Retry
+    ready --> [*]
 ```
 **Worker pool (tailor.py):** `_queue` (ordered list, visible/reorderable from the panel),
 `_busy` (one task per job at a time), `_target["n"]` (live-adjustable via
@@ -471,6 +565,22 @@ shows a job the user rejected.
 Design mockup: "JobScout apply filler" artifact (Sep 2026). Two halves: JobScout owns the
 **queue**; a Claude session with the Chrome extension owns the **hands**, because the
 extension is only reachable from a Claude session, not from Flask.
+
+```mermaid
+stateDiagram-v2
+    [*] --> planned: apply.py plan (form read + resolver)
+    planned --> approved: user reviews the plan
+    approved --> queued: Apply now / Apply all approved
+    queued --> filling: GET /api/apply/queue/next (locks, opens apply_runs row)
+    filling --> prefilled: tab left open for the user's Submit
+    filling --> submitted: unattended, live form == approved plan
+    filling --> held: login wall · captcha · unplanned question · mismatch
+    filling --> failed
+    prefilled --> submitted: Mark submitted
+    held --> queued: Re-queue
+    failed --> queued: Retry
+    submitted --> [*]: job status = applied, applied.md + plan.json
+```
 
 - **Queue**: `apply_state` approved --Apply now / Apply all approved--> `queued`
   (`apply_queued_at` orders it). `GET /api/apply/queue/next?runner=&mode=` locks the next plan
