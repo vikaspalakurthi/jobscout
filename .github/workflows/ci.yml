@@ -1,0 +1,30 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: pip install -r requirements.txt pyflakes
+      - name: Lint (undefined names, unused imports)
+        run: python -m pyflakes .   # "." not *.py - PowerShell on the Windows runner does not expand globs
+      - name: Smoke tests (no network, temp database)
+        run: python -m unittest discover -s tests -v
+      - name: Config files parse
+        run: python -c "import yaml,glob; [yaml.safe_load(open(f,encoding='utf-8')) for f in glob.glob('config/*.yaml')]; print('ok')"

@@ -1,0 +1,27 @@
+name: Greet first-time contributors
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  greet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/first-interaction@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          issue-message: >
+            Thanks for the first issue. Please make sure nothing personal (resume, profile,
+            application details) is in it - this tool handles job-search data, and issues are
+            public. A maintainer will reply; the three-category rule in docs/ARCHITECTURE.md
+            decides most board questions.
+          pr-message: >
+            Thanks for the first PR. CI runs the smoke tests on Linux and Windows; the review
+            bot will leave comments shortly, and a maintainer follows. Check the PR template's
+            boxes - docs updated in the same PR is the one people most often miss.

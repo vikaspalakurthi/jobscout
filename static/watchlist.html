@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JobScout — Watchlist</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="row">
+    <h1>Job<span>Scout</span></h1>
+    <nav>
+      <a href="/">Jobs</a>
+      <a href="/companies">Companies</a>
+      <a href="/watchlist" class="active">Watchlist</a>
+      <a href="/settings">Settings</a>
+      <a href="/about">How it works</a>
+    </nav>
+    <span class="stat" id="stat-line"></span>
+  </div>
+</header>
+
+<main>
+  <p class="help">Companies JobScout <b>cannot fetch</b> — no public board API (own
+  platform, iCIMS, Phenom, Taleo…). Check them by hand via the links; the Adzuna column
+  shows what partial coverage the sweeps already give you. If one ever switches to a
+  fetchable ATS, use <b>Add a company</b> on the Companies page and remove it here
+  (<span class="mono">config/watchlist.yaml</span>).
+  Keyboard: <b>&#8593;/&#8595;</b> move &middot; <b>Space</b> select &middot;
+  <b>Shift+&#8593;/&#8595;</b> or <b>Shift+Click</b> select a range.</p>
+  <div class="filters" style="padding:8px 0">
+    <input type="text" id="wf-q" placeholder="Filter&hellip;">
+    <label><input type="checkbox" id="wf-austin"> Austin-relevant only</label>
+    <span id="bulk-bar" style="display:none; gap:8px; align-items:center">
+      <span class="stat" id="bulk-count"></span>
+      <button class="small primary" id="bulk-open">Open combined LinkedIn search &#8599;</button>
+      <button class="small" id="bulk-copy">Copy URL</button>
+      <button class="small" id="bulk-copy-each">Copy per-company URLs</button>
+      <button class="small" id="bulk-clear">Clear</button>
+      <span class="stat" id="bulk-note"></span>
+    </span>
+  </div>
+  <table class="grid" id="grid">
+    <thead><tr>
+      <th style="width:30px"><input type="checkbox" id="sel-all" title="Select all shown"></th>
+      <th data-key="name" data-type="text">Company</th>
+      <th data-key="platform" data-type="text">Platform</th>
+      <th data-key="coverage" data-type="num">Adzuna coverage</th>
+      <th>Careers site</th>
+      <th>LinkedIn search</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2 style="font-size:15px;color:var(--accent);margin:26px 0 6px">Boards to check by hand</h2>
+  <table class="grid" id="boards"><tbody></tbody></table>
+</main>
+
+<script>
+const esc = s => (s ?? '').toString().replace(/[&<>"]/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let data = {companies: [], boards: []};
+let sortState = { key: 'name', dir: 1 };
+const SELECTED = new Set();
+
+const clean = n => n.split(' (')[0].split(' /')[0].trim();
+const ROLE_Q = '(SRE OR DevOps OR "Site Reliability" OR "Platform Engineer")';
+
+function li(name) {
+  const q = encodeURIComponent(`"${clean(name)}" AND ${ROLE_Q}`);
+  return `https://www.linkedin.com/jobs/search/?keywords=${q}&location=United%20States`;
+}
+
+function bulkUrl(names) {
+  const comp = names.map(n => `"${clean(n)}"`).join(' OR ');
+  const q = encodeURIComponent(`(${comp}) AND ${ROLE_Q}`);
+  return `https://www.linkedin.com/jobs/search/?keywords=${q}&location=United%20States`;
+}
+
+function updateBulkBar() {
+  const bar = document.getElementById('bulk-bar');
+  bar.style.display = SELECTED.size ? 'inline-flex' : 'none';
+  document.getElementById('bulk-count').textContent = `${SELECTED.size} selected`;
+  document.getElementById('bulk-note').textContent =
+    SELECTED.size > 10 ? 'tip: LinkedIn matches best with ~10 or fewer' : '';
+}
+
+function render() {
+  const q = document.getElementById('wf-q').value.trim().toLowerCase();
+  const austinOnly = document.getElementById('wf-austin').checked;
+  const { key, dir } = sortState;
+  const type = document.querySelector(`th[data-key="${key}"]`)?.dataset.type || 'text';
+  const rows = data.companies.filter(c =>
+    (!q || c.name.toLowerCase().includes(q)) && (!austinOnly || c.austin))
+    .sort((a, b) => {
+      let va = a[key], vb = b[key];
+      if (type === 'num') return ((va ?? -1) - (vb ?? -1)) * dir;
+      return String(va ?? '').localeCompare(String(vb ?? '')) * dir;
+    });
+  document.querySelectorAll('th[data-key]').forEach(th => {
+    th.textContent = th.textContent.replace(/ [▲▼]$/, '');
+    if (th.dataset.key === key) th.textContent += dir === 1 ? ' ▲' : ' ▼';
+  });
+  document.getElementById('stat-line').textContent =
+    `${rows.length} companies · check manually`;
+  document.querySelector('#grid tbody').innerHTML = rows.map(c => `<tr>
+    <td><input type="checkbox" class="sel" data-name="${esc(c.name)}"${SELECTED.has(c.name) ? ' checked' : ''}></td>
+    <td><b>${esc(c.name)}</b>${c.austin ? ' <span class="chip">Austin</span>' : ''}</td>
+    <td class="mono">${esc(c.platform || '')}</td>
+    <td>${c.in_sweeps
+        ? `<span class="badge-ok">swept</span> <span class="mono">${c.adzuna_jobs || 0} jobs seen</span>`
+        : (c.adzuna_jobs ? `<span class="mono">${c.adzuna_jobs} jobs via queries</span>`
+                         : '<span class="badge-err">none</span>')}</td>
+    <td><a href="${esc(c.careers)}" target="_blank" rel="noopener">careers site &#8599;</a></td>
+    <td><a href="${li(c.name)}" target="_blank" rel="noopener">LinkedIn &#8599;</a></td>
+  </tr>`).join('');
+  document.querySelectorAll('#grid .sel').forEach(cb => cb.onchange = () => {
+    cb.checked ? SELECTED.add(cb.dataset.name) : SELECTED.delete(cb.dataset.name);
+    syncSelAll(); updateBulkBar();
+  });
+  const trs = [...document.querySelectorAll('#grid tbody tr')];
+  cursor = Math.min(cursor, Math.max(0, trs.length - 1));
+  anchor = Math.min(anchor, Math.max(0, trs.length - 1));
+  rangeBase = null;
+  trs.forEach((tr, i) => tr.addEventListener('click', ev => {
+    if (ev.shiftKey) {
+      // range-select between the last plain-clicked row (anchor) and this one
+      const [a, b] = [Math.min(anchor, i), Math.max(anchor, i)];
+      for (let k = a; k <= b; k++) SELECTED.add(rowName(trs[k]));
+      cursor = i;
+      applySelectionToDom(trs);
+      syncSelAll(); updateBulkBar();
+    } else {
+      cursor = i; anchor = i; rangeBase = null;
+    }
+    applyFocus();
+  }));
+  applyFocus();
+  syncSelAll(); updateBulkBar();
+}
+
+let cursor = 0;
+let anchor = 0;          // last plain-clicked/toggled row: start point for ranges
+let rangeBase = null;    // selection snapshot when a Shift+Arrow session starts
+
+const rowName = tr => tr.querySelector('.sel').dataset.name;
+
+function applySelectionToDom(trs) {
+  trs.forEach(tr => {
+    const cb = tr.querySelector('.sel');
+    cb.checked = SELECTED.has(cb.dataset.name);
+  });
+}
+
+function applyFocus() {
+  const trs = [...document.querySelectorAll('#grid tbody tr')];
+  trs.forEach((tr, i) => tr.classList.toggle('focused', i === cursor));
+  trs[cursor]?.scrollIntoView({ block: 'nearest' });
+}
+
+document.addEventListener('keydown', e => {
+  const t = e.target;
+  const isTextInput = t && (t.tagName === 'TEXTAREA' ||
+    (t.tagName === 'INPUT' && t.type !== 'checkbox'));
+  if (isTextInput) return;                       // don't hijack typing in the filter box
+  const trs = [...document.querySelectorAll('#grid tbody tr')];
+  if (!trs.length) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (t && t.tagName === 'INPUT') t.blur();    // leave a clicked checkbox's own focus
+    const next = Math.min(trs.length - 1,
+                          Math.max(0, cursor + (e.key === 'ArrowDown' ? 1 : -1)));
+    if (e.shiftKey) {
+      // extend/shrink a live range from the anchor; rows outside it keep their state
+      if (rangeBase === null) { rangeBase = new Set(SELECTED); anchor = cursor; }
+      cursor = next;
+      SELECTED.clear();
+      rangeBase.forEach(n => SELECTED.add(n));
+      const [a, b] = [Math.min(anchor, cursor), Math.max(anchor, cursor)];
+      for (let k = a; k <= b; k++) SELECTED.add(rowName(trs[k]));
+      applySelectionToDom(trs);
+      syncSelAll(); updateBulkBar();
+    } else {
+      cursor = next; anchor = next; rangeBase = null;
+    }
+    applyFocus();
+  } else if (e.key === ' ') {
+    if (t && t.tagName === 'INPUT' && t.type === 'checkbox') return;  // native toggle
+    e.preventDefault();                          // and don't page-scroll
+    anchor = cursor; rangeBase = null;
+    const cb = trs[cursor]?.querySelector('.sel');
+    if (cb) { cb.checked = !cb.checked; cb.onchange(); }
+  }
+});
+
+// shift+click would otherwise drag-select the page text
+document.getElementById('grid').addEventListener('mousedown', e => {
+  if (e.shiftKey) e.preventDefault();
+});
+
+function syncSelAll() {
+  const cbs = [...document.querySelectorAll('#grid .sel')];
+  document.getElementById('sel-all').checked =
+    cbs.length > 0 && cbs.every(cb => SELECTED.has(cb.dataset.name));
+}
+
+document.querySelectorAll('th[data-key]').forEach(th => {
+  th.style.cursor = 'pointer';
+  th.onclick = () => {
+    const key = th.dataset.key;
+    if (sortState.key === key) sortState.dir *= -1;
+    else sortState = { key, dir: th.dataset.type === 'num' ? -1 : 1 };
+    render();
+  };
+});
+
+(async () => {
+  data = await (await fetch('/api/watchlist')).json();
+  data.companies.forEach(c =>
+    c.coverage = (c.adzuna_jobs || 0) + (c.in_sweeps ? 0.5 : 0));
+  render();
+  document.querySelector('#boards tbody').innerHTML = (data.boards || []).map(b => `<tr>
+    <td><b><a href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.name)} &#8599;</a></b></td>
+    <td class="help">${esc(b.note || '')}</td>
+  </tr>`).join('');
+})();
+
+document.getElementById('wf-q').oninput = render;
+document.getElementById('wf-austin').onchange = render;
+
+document.getElementById('sel-all').onchange = () => {
+  const on = document.getElementById('sel-all').checked;
+  document.querySelectorAll('#grid .sel').forEach(cb => {
+    on ? SELECTED.add(cb.dataset.name) : SELECTED.delete(cb.dataset.name);
+  });
+  render();
+};
+
+async function copyText(text, btn) {
+  try { await navigator.clipboard.writeText(text); }
+  catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); ta.remove();
+  }
+  const old = btn.textContent;
+  btn.textContent = 'Copied!';
+  setTimeout(() => { btn.textContent = old; }, 1600);
+}
+
+document.getElementById('bulk-open').onclick = () =>
+  window.open(bulkUrl([...SELECTED]), '_blank');
+document.getElementById('bulk-copy').onclick = e =>
+  copyText(bulkUrl([...SELECTED]), e.target);
+document.getElementById('bulk-copy-each').onclick = e =>
+  copyText([...SELECTED].map(n => `${n}: ${li(n)}`).join('\n'), e.target);
+document.getElementById('bulk-clear').onclick = () => { SELECTED.clear(); render(); };
+</script>
+</body>
+</html>

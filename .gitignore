@@ -1,0 +1,9 @@
+data/
+config/local.yaml
+__pycache__/
+*.pyc
+.env
+resume/
+
+# tailor-resume skill: personal fact files live in resume/ (ignored above); skill's npm deps
+node_modules/

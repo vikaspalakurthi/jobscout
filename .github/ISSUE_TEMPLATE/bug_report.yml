@@ -1,0 +1,30 @@
+name: Bug report
+description: Something in JobScout misbehaves (fetch, scoring, UI, tailoring, filler)
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks. **Never paste your resume, profile.yaml, or application details here** - redact company-specific values if you need to show a plan.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Fetching / a board, Scoring (keyword), Fit scoring (model), Jobs UI, Companies / Watchlist, Resume tailoring, Apply plan / filler, Notifications / schedule, Setup / install, Other]
+    validations: { required: true }
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got. Include the Report button output or the server log line if relevant.
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: Commit / version
+      placeholder: "git rev-parse --short HEAD"
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: "Windows 11 / Python 3.13 / Claude Code 2.1.x"

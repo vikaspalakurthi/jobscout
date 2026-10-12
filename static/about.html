@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JobScout — How it works</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  main { max-width: none; padding: 0 24px 60px; }
+  h2 { font-size: 16px; margin: 26px 0 8px; color: var(--accent); }
+  h3 { font-size: 14px; margin: 18px 0 6px; }
+  p, li { font-size: 13.5px; color: var(--text); }
+  li { margin: 5px 0; }
+  .tag { display: inline-block; background: var(--chip); border-radius: 4px; padding: 0 6px;
+         font-size: 11.5px; color: var(--muted); margin-left: 6px; vertical-align: middle; }
+  .tag.good { color: var(--good); } .tag.bad { color: var(--bad); } .tag.mid { color: var(--mid); }
+  code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 0 48px; }
+  .grid > section { min-width: 0; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 12px 0 4px; }
+  .kpi { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
+  .kpi b { display: block; font-size: 22px; color: var(--accent); }
+  .kpi span { font-size: 12px; color: var(--muted); }
+  table.flow { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 13px; }
+  table.flow th, table.flow td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table.flow th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  .ok { color: var(--good); } .todo { color: var(--mid); } .no { color: var(--bad); }
+</style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <h1>Job<span>Scout</span></h1>
+    <nav>
+      <a href="/">Jobs</a>
+      <a href="/companies">Companies</a>
+      <a href="/watchlist">Watchlist</a>
+      <a href="/settings">Settings</a>
+      <a href="/about" class="active">How it works</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <h2>Where we are</h2>
+  <p>JobScout is a local pipeline: <b>find</b> jobs from legitimate feeds, <b>score</b> them against your profile,
+    <b>tailor</b> a resume per job with Claude, <b>plan</b> the application from the real form, and let a Claude session
+    <b>fill</b> it in your own Chrome. Everything stays on this machine; nothing is scraped from LinkedIn or Indeed and
+    no bot protection is ever bypassed.</p>
+  <div class="kpis">
+    <div class="kpi"><b id="k-boards">…</b><span>direct company boards</span></div>
+    <div class="kpi"><b id="k-jobs">…</b><span>jobs scored in the database</span></div>
+    <div class="kpi"><b id="k-inbox">…</b><span>in your Inbox now</span></div>
+    <div class="kpi"><b id="k-applied">…</b><span>applied</span></div>
+    <div class="kpi"><b id="k-refresh">…</b><span>last refresh</span></div>
+  </div>
+  <table class="flow">
+    <tr><th>Stage</th><th>State</th><th>What it does</th></tr>
+    <tr><td>Find</td><td class="ok">working</td><td>~530 direct boards on 9 platforms + Adzuna, Remotive, RemoteOK, The Muse, Hacker News. Each job carries two dates where the board reports them: <b>posted</b> (first published) and <b>updated</b> (the employer's last edit) - the age filter and sort can use either. Boards are fetched 8 at a time with a live progress strip (phase, N/M, elapsed, failures). Refresh on demand, or on the clock: 06:00, 11:00, 18:00 and 23:00 by default (Settings → Refresh schedule; runs only while the server is up).</td></tr>
+    <tr><td>Score</td><td class="ok">working</td><td>Two scores. <b>Keyword score</b> (title match, skills in the description, location, seniority, freshness; weights in <code>config/skills.yaml</code>, Rescore applies instantly) is the cheap prefilter. <b>Fit</b> is the one the list sorts on: jobs at or above the gate go, ten at a time, to a cheap Claude model through your subscription with your skills inventory, preferences and the judgement rules in <code>resume/fit-profile.md</code>; each gets a 0-100, a one-line reason and its gaps. It knows the difference between "SRE who runs databases" and "database internals expert".</td></tr>
+    <tr><td>Learn</td><td class="ok">working</td><td>Thumbs on a fit score (too high / too low, with a note) accumulate; after five, a stronger model rewrites the profile rules and the affected jobs re-score. Answers you give while tailoring resumes feed the same inventory. First rule learned 2026-10-03: DBA-flavoured SRE roles cap at 50-55.</td></tr>
+    <tr><td>Tailor</td><td class="ok">working</td><td>Analyze → your answers → DOCX resume, plus application Q&amp;A and cover letters. 2–3 jobs in parallel.</td></tr>
+    <tr><td>Plan</td><td class="ok">working</td><td>Reads the live form (Greenhouse, Ashby, Lever), fills every field from your profile and answers, drafts every essay question, you approve.</td></tr>
+    <tr><td>Fill</td><td class="ok">prefill proven, unattended pending its first live test</td><td>The <code>/apply-queue</code> skill drives your Chrome. Prefill stops before Submit; unattended submits only on an exact match. 2 real applications so far via the pipeline.</td></tr>
+    <tr><td>Alert</td><td class="ok">built</td><td>"New this refresh" filter and an optional Discord digest of new jobs above your score bar.</td></tr>
+  </table>
+
+  <div class="grid">
+  <section>
+  <h2>Where the jobs come from: three kinds of employer</h2>
+  <p>Every company runs its hiring on some software (an applicant tracking system, ATS). What matters is how that
+    software exposes the job list.</p>
+  <h3>1. Rented ATS with a documented feed <span class="tag good">one-line config</span></h3>
+  <p><b>Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable, BambooHR, Breezy.</b> Each publishes the
+    company's open jobs at a public address, full text, no login. Most startups and mid-size tech companies live here.
+    <code>python detect.py "Company"</code> guesses the identifier; the Companies page does it with one click.</p>
+  <h3>2. Rented ATS without a documented feed <span class="tag good">read the way the page reads it</span></h3>
+  <p><b>Workday, Oracle HCM, Phenom, iCIMS.</b> Nobody wrote the feed up, but the careers page loads its jobs from a
+    JSON endpoint with no login and no captcha, and JobScout calls the same endpoint. This is where the large
+    enterprises are: Dell, JPMorgan Chase, Texas Instruments, Cisco, AMD, Charles Schwab, Samsung, Intel, Visa, Applied
+    Materials, CrowdStrike, SailPoint, USAA, GM. Identifiers cannot be guessed from a name, so
+    <code>python detect.py --url &lt;careers page&gt;</code> (or the URL field on the Companies page) fingerprints the
+    page and prints the config line. Recognised but not yet fetchable: Eightfold (refuses calls without its page token:
+    Infineon, Ericsson, PayPal), SuccessFactors (redirects to SSO), Radancy (Arm), Jobvite (Enverus).</p>
+  <h3>3. Own builds behind bot protection <span class="tag bad">never fetched</span></h3>
+  <p><b>Apple, Tesla, Google, Meta, Microsoft, Indeed.</b> Reading them would mean pretending not to be a program.
+    That is the line this project does not cross; Adzuna is the only channel for these.</p>
+  <h3>Aggregators <span class="tag mid">discovery, not quality</span></h3>
+  <p>An aggregator has no jobs of its own; it copies postings from thousands of employers. LinkedIn and Indeed are
+    closed to programs. <b>Adzuna</b> has a free API and is the one window into category-3 employers and staffing
+    agencies. Its cost: 500-character snippets instead of descriptions, 50 newest per query, index dates rather than
+    posting dates, and the same requisition reposted under several agency names. It can be switched off in Settings;
+    its real value is as a seed list of employers to convert into direct boards. <b>Remotive, RemoteOK, The Muse</b>
+    and the monthly <b>Hacker News "Who is hiring"</b> thread add remote and small-company inventory.</p>
+  <h3>Why LinkedIn shows more</h3>
+  <p>Its "Austin" search includes remote-US jobs, every agency repost of the same req, weeks-old postings, and the
+    bot-protected employers above. Here, tick <b>Austin + US remote</b>, widen to 30 days, and include the
+    Infra / Platform / DevOps / Reliability roles alongside SRE to compare like with like.</p>
+  </section>
+
+  <section>
+  <h2>What gets filtered before you see it</h2>
+  <ul>
+    <li><b>Relevance.</b> Boards return every job (sales, legal, design…). Titles matching SRE / DevOps / platform /
+      infra / admin / Kafka / ELK / observability patterns are kept; a job whose title fails is still kept when its
+      description shows at least three distinct ops signals.</li>
+    <li><b>Location.</b> Non-US is dropped; onsite-only in non-Texas US cities is dropped; global-remote without a
+      clear US signal is dropped (all adjustable in <a href="/settings">Settings</a>).</li>
+    <li><b>Age.</b> Aggregator posts older than the limit are dropped; direct boards get their own limit (default 60
+      days) because companies leave evergreen requisitions open for a year, and the Inbox hides anything older.</li>
+    <li><b>Work authorization.</b> Postings requiring citizenship or clearance are excluded from the Inbox by default (for a
+      candidate who is work-authorized without sponsorship, those roles are simply closed).</li>
+    <li><b>Duplicates.</b> The same job from several sources collapses to one card, preferring the direct board's
+      copy with its real posting date.</li>
+  </ul>
+
+  <h2>What's genuinely missed today</h2>
+  <ul>
+    <li><b>LinkedIn-only and Indeed-only postings</b>, common for recruiters and staffing agencies.</li>
+    <li><b>Category-3 employers</b> beyond what Adzuna catches, and category-2 employers not yet in the board list.</li>
+    <li><b>Contract and C2C reqs.</b> Agencies run staffing platforms (Bullhorn, JobDiva) with no feeds, and most
+      corp-to-corp requirements never reach a website: they move through recruiter email lists and Dice, neither of
+      which has a public API. Adzuna surfaces the public slice (Apex, Insight Global, Robert Half, TCS…).</li>
+    <li><b>Unusual titles with vague descriptions</b>, and SmartRecruiters boards, which are title-only.</li>
+  </ul>
+
+  <h2>Tailored resumes and applications</h2>
+  <ul>
+    <li><b>Start</b> with the &#9998; button on a job, or select several and click <b>Tailor resumes</b> (citizen-only
+      and applied jobs are skipped; a per-click cap lives in Settings).</li>
+    <li><b>Analyze</b>: Claude reads the posting against your skills inventory and asks only about requirements it
+      cannot confirm. A job with open questions waits in the Resumes tab, grouped by job; workers move on to the
+      next job meanwhile. Answers apply to that application only unless you tick "Also remember", the only path into
+      your inventory. <b>Not interested</b> drops a job and its questions in one click.</li>
+    <li><b>Generate</b>: the resume is rewritten from your master resume and built as a DOCX in
+      <code>resume\output\&lt;Company&gt;\&lt;Role&gt;\&lt;jobId&gt;\</code> with notes, the source text and a snapshot
+      of the posting. Regenerating keeps history.</li>
+    <li><b>Q&amp;A and cover letters</b>: long and short versions, within any stated limit, regenerable with your
+      feedback. A cover-letter slot on a form triggers the letter automatically.</li>
+    <li><b>Plan</b>: reads the real application form and maps every field; multi-select questions are checkboxes,
+      every essay question (required or optional) is drafted, and your edits survive the page refreshing. Applied or
+      rejected jobs leave the pipeline on their own.</li>
+    <li><b>Fill</b>: a Claude session with the Chrome extension drains the queue in your Chrome, always with the
+      tailored resume, generating a missing cover letter on the spot. Prefill leaves the tab for your Submit;
+      unattended submits only when the live form matches the approved plan. Captchas and account logins are never
+      automated; Workday and Adzuna "Easy Apply" need an account you create once yourself.</li>
+  </ul>
+  </section>
+  </div>
+
+  <h2>Future scope, in rough order of value</h2>
+  <ul>
+    <li><b>Automatic board discovery.</b> Follow one Adzuna posting per employer to its landing page, fingerprint it,
+      and propose the config line. Converts the remaining Adzuna-only employers into full-text boards in one run.</li>
+    <li><b>Scheduled apply runs</b>: prefill in the morning window, unattended at night (the refresh side is
+      scheduled already; the filler still needs a Claude session with Chrome).</li>
+    <li><b>An "SRE-family" saved filter</b> (SRE + Reliability + Platform + Infra + DevOps + Observability, Austin + US
+      remote, 30 days) so the honest LinkedIn-equivalent view is one click.</li>
+    <li><b>Eightfold and SuccessFactors fetchers</b> if a clean path appears (Eightfold needs its page token).</li>
+    <li><b>Contract and C2C stream.</b> A Gmail fetcher over a label you assign to recruiter mailing lists: parse each
+      requirement into a job (title, location, rate, vendor), dedupe reposts, score it, and draft the reply with the
+      tailored resume for you to send. Needs your decision on the LLC route first.</li>
+    <li><b>A "Run queue" button</b> for captcha-free boards via a browser the app controls itself (Playwright), so
+      filling no longer needs a Claude session for the easy cases.</li>
+    <li><b>Jooble / Careerjet</b> (free aggregator APIs) and, if it ever feels worth paying for, <b>JSearch</b>
+      (Google for Jobs, which carries most LinkedIn and Indeed inventory).</li>
+  </ul>
+</main>
+<script>
+(async () => {
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  try {
+    const s = await (await fetch('/api/status')).json();
+    const sum = (s.last_refresh || {})._summary || {};
+    set('k-jobs', (sum.scored || 0).toLocaleString());
+    set('k-inbox', (s.counts?.inbox ?? 0).toLocaleString());
+    set('k-applied', (s.counts?.applied ?? 0).toLocaleString());
+    set('k-refresh', sum.at ? new Date(sum.at).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'}) : 'never');
+  } catch (e) { set('k-jobs', '?'); }
+  try {
+    const c = await (await fetch('/api/companies')).json();
+    const boards = (c.companies || []).filter(x => x.board && !/^via aggregators/.test(x.board));   // configured boards only
+    set('k-boards', boards.length ? boards.length.toLocaleString() : '528');
+  } catch (e) { set('k-boards', '528'); }
+  try {
+    const j = await (await fetch('/api/jobs?tab=all&limit=1')).json();
+    if (j.tab_counts?.all) set('k-jobs', j.tab_counts.all.toLocaleString());   // deduped, all statuses
+    if (j.tab_counts?.inbox != null) set('k-inbox', j.tab_counts.inbox.toLocaleString());   // honours the age limit
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>

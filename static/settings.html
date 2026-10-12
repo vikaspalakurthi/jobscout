@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JobScout — Settings</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="row">
+    <h1>Job<span>Scout</span></h1>
+    <nav>
+      <a href="/">Jobs</a>
+      <a href="/companies">Companies</a>
+      <a href="/watchlist">Watchlist</a>
+      <a href="/settings" class="active">Settings</a>
+      <a href="/about">How it works</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="form-card">
+    <h2>Adzuna API</h2>
+    <p class="help">Broad aggregator sweep (Austin / Dallas / Houston + remote). Register free at
+      <a href="https://developer.adzuna.com" target="_blank" rel="noopener">developer.adzuna.com</a>,
+      then paste your keys here. Free tier is ~1,000 calls/month; each refresh uses about
+      one call per query &times; location.</p>
+    <div class="form-row">
+      <label><input type="checkbox" id="az-on"> Use Adzuna on refresh (off = direct company boards only; snippets, not full descriptions)</label>
+    </div>
+    <div class="form-row">
+      <label for="az-id">App ID</label>
+      <input type="text" id="az-id" autocomplete="off">
+    </div>
+    <div class="form-row">
+      <label for="az-key">App Key</label>
+      <input type="password" id="az-key" autocomplete="off">
+      <button id="az-show" type="button">Show</button>
+    </div>
+    <div class="form-row">
+      <label for="az-locs">Locations</label>
+      <input type="text" id="az-locs" placeholder="Austin, TX; Dallas, TX; Houston, TX">
+    </div>
+    <p class="help">Separate locations with semicolons. A remote sweep runs automatically on top.</p>
+    <div class="form-row">
+      <button class="primary" id="az-save">Save</button>
+      <button id="az-test">Test key</button>
+      <span class="status-line" id="az-status"></span>
+    </div>
+  </div>
+
+  <div class="form-card">
+    <h2>Location filters</h2>
+    <p class="help">What gets kept at fetch time. Applies from the next Refresh.</p>
+    <div class="form-row">
+      <label><input type="checkbox" id="ft-tx"> Keep Texas outside Austin (DFW, Houston, San Antonio metros)</label>
+    </div>
+    <div class="form-row">
+      <label><input type="checkbox" id="ft-us"> Keep onsite jobs in other US cities</label>
+    </div>
+    <div class="form-row">
+      <label><input type="checkbox" id="ft-global"> Keep global-remote jobs (no clear US signal)</label>
+    </div>
+    <div class="form-row">
+      <label for="ft-age">Max posting age (days), aggregators</label>
+      <input type="number" id="ft-age" min="1" max="365" style="width:90px">
+      <label for="ft-age-b">direct boards</label>
+      <input type="number" id="ft-age-b" min="1" max="365" style="width:90px" title="Direct boards keep evergreen reqs open for a year or more; older postings are dropped on refresh and hidden from the Inbox">
+    </div>
+    <div class="form-row">
+      <button class="primary" id="ft-save">Save</button>
+      <span class="status-line" id="ft-status"></span>
+    </div>
+  </div>
+
+  <div class="form-card">
+    <h2>Refresh schedule</h2>
+    <p class="help">Nothing runs unless the server is up (<span class="mono">python server.py</span>). At each
+      listed clock time (your PC's local time) the running server refreshes every source and posts the Discord
+      digest if enabled; the Jobs page shows the next run next to the Refresh button. A time that passes while the
+      server is down is skipped, not run late. Takes effect within a minute of saving, no restart.</p>
+    <div class="form-row">
+      <label for="rf-at">Refresh at</label>
+      <input type="text" id="rf-at" style="width:260px" placeholder="06:00, 11:00, 18:00, 23:00"> (24h, comma-separated; blank = off)
+    </div>
+    <div class="form-row">
+      <label for="rf-every">or every</label>
+      <input type="number" id="rf-every" min="0" max="168" step="0.5" style="width:90px"> hours, used only when no times are set (0 = manual only)
+    </div>
+    <div class="form-row">
+      <label for="rf-workers">Boards fetched in parallel</label>
+      <input type="number" id="rf-workers" min="1" max="16" style="width:90px" title="Company boards are independent HTTP calls; 8 keeps a full refresh of 500+ boards to a few minutes">
+    </div>
+    <div class="form-row">
+      <button class="primary" id="rf-save">Save</button>
+      <span class="status-line" id="rf-status"></span>
+    </div>
+  </div>
+
+  <div class="form-card">
+    <h2>Fit scoring (model)</h2>
+    <p class="help">The keyword score is a prefilter. Jobs at or above the gate are sent, ten at a time, to a cheap
+      Claude model through your subscription (<span class="mono">claude -p</span>, no API key) together with
+      <span class="mono">resume/skills-inventory.md</span>, <span class="mono">preferences.md</span> and the
+      judgement rules in <span class="mono">resume/fit-profile.md</span>. Each job gets a fit 0-100, a reason and
+      its gaps. Thumbs on the Jobs page accumulate as feedback; after <b>N</b> items a stronger model rewrites the
+      profile rules and the affected jobs re-score. Answers you give while tailoring sharpen it too.</p>
+    <div class="form-row">
+      <label><input type="checkbox" id="fit-on"> Score gated new jobs after every refresh</label>
+    </div>
+    <div class="form-row">
+      <label for="fit-model">Scorer model</label>
+      <select id="fit-model"></select>
+      <label for="fit-think">thinking</label>
+      <select id="fit-think">
+        <option value="full">full (~90 s / 10 jobs)</option>
+        <option value="small">small (~45 s)</option>
+        <option value="off">off (~30 s)</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label for="fit-gate">Keyword-score gate</label>
+      <input type="number" id="fit-gate" min="0" max="100" style="width:80px">
+      <label for="fit-par">parallel</label>
+      <input type="number" id="fit-par" min="1" max="3" style="width:60px">
+      <label for="fit-auto">update profile after</label>
+      <input type="number" id="fit-auto" min="0" max="50" style="width:60px"> feedback items (0 = manual)
+    </div>
+    <div class="form-row">
+      <label for="fit-pmodel">Profile-update model</label>
+      <select id="fit-pmodel"></select>
+    </div>
+    <div class="form-row">
+      <button class="primary" id="fit-save">Save</button>
+      <button id="fit-profile-btn">Update profile from feedback now</button>
+      <button id="fit-show">Show profile</button>
+      <span class="status-line" id="fit-status"></span>
+    </div>
+    <pre id="fit-profile" class="mono" style="display:none; white-space:pre-wrap; font-size:12px; max-height:380px; overflow:auto"></pre>
+  </div>
+
+  <div class="form-card">
+    <h2>Resume tailoring</h2>
+    <p class="help">The <b>&#9998; Tailor resumes</b> button runs the <span class="mono">tailor-resume</span>
+      Claude Code skill in the background using your Claude subscription (no API key). One job at a
+      time; each takes a few minutes. Output: <span class="mono">&lt;folder&gt;\&lt;Company&gt;\&lt;Role&gt;\&lt;jobId&gt;\Tailored_Resume.docx</span>
+      plus <span class="mono">notes.md</span>, <span class="mono">resume.md</span> and a snapshot of the posting.</p>
+    <div class="form-row">
+      <label for="rs-model">Model</label>
+      <select id="rs-model"></select>
+    </div>
+    <div class="form-row">
+      <label for="rs-dir">Output folder</label>
+      <input type="text" id="rs-dir" placeholder="C:\Users\you\OneDrive\Resumes">
+    </div>
+    <div class="form-row">
+      <label for="rs-file">Resume file name</label>
+      <input type="text" id="rs-file" style="min-width:200px;flex:0 1 240px">
+    </div>
+    <div class="form-row">
+      <label for="rs-cmd">Claude Code command</label>
+      <input type="text" id="rs-cmd" style="min-width:200px;flex:0 1 320px">
+      <button id="rs-test">Test</button>
+      <span class="status-line" id="rs-test-status"></span>
+    </div>
+    <p class="help">Leave as <span class="mono">claude</span> if it is on PATH; otherwise the full path to
+      <span class="mono">claude.exe</span>. Sign in once with <span class="mono">claude</span> &rarr; <span class="mono">/login</span> (Claude account).</p>
+    <div class="form-row">
+      <label for="rs-batch">Max jobs per click</label>
+      <input type="number" id="rs-batch" min="1" max="50" style="width:80px">
+      <label for="rs-timeout" style="min-width:auto">Timeout per step (min)</label>
+      <input type="number" id="rs-timeout" min="2" max="60" style="width:80px">
+      <label for="rs-par" style="min-width:auto">Parallel runs</label>
+      <input type="number" id="rs-par" min="1" max="3" style="width:60px">
+    </div>
+    <p class="help">Parallel runs finish a batch faster but use Max capacity faster (2 = 2&times; tokens per
+      minute; total per job unchanged). Also adjustable live in the Resumes tab.</p>
+    <div class="form-row">
+      <button class="primary" id="rs-save">Save</button>
+      <span class="status-line" id="rs-status"></span>
+    </div>
+  </div>
+
+  <div class="form-card">
+    <h2>Apply pipeline</h2>
+    <p class="help">Plans read each job's real application form (Greenhouse / Ashby APIs, Lever page) and
+      map every field to a value from <span class="mono">resume/profile.yaml</span>, your Q&amp;A answers and the
+      generated files. Nothing is submitted without your approval; the filler (next stage) runs only on approved plans.</p>
+    <div class="form-row">
+      <label for="ap-mode">Execution mode</label>
+      <select id="ap-mode"><option value="prefill">Prefill window - you click Submit</option><option value="unattended">Unattended submit (approved + exact-match only)</option></select>
+    </div>
+    <div class="form-row">
+      <label for="ap-window">Prefill window</label>
+      <input type="text" id="ap-window" style="min-width:120px;flex:0 1 160px" placeholder="06:00-06:30">
+      <label><input type="checkbox" id="ap-auto"> Auto-plan every job when its resume becomes ready</label>
+    </div>
+    <div class="form-row">
+      <label><input type="checkbox" id="ap-unatt"> Allow unattended submit (off = every queued plan is filled as prefill)</label>
+    </div>
+    <div class="form-row">
+      <label for="ap-max">Max forms per run</label>
+      <input type="number" id="ap-max" min="1" max="30" style="width:70px">
+      <label for="ap-pause" style="min-width:auto">Pause between forms (s)</label>
+      <input type="number" id="ap-pause" min="0" max="300" style="width:70px">
+    </div>
+    <p class="help">Queued plans are filled by the <span class="mono">/apply-queue</span> skill running in a Claude session with the
+      Chrome extension (on demand, or from a scheduled task). It never solves captchas, never creates accounts, and in
+      prefill mode never clicks Submit.</p>
+    <div class="form-row">
+      <button class="primary" id="ap-save">Save</button>
+      <span class="status-line" id="ap-status"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Notifications</h2>
+    <p class="help">After every refresh, the new postings that clear the score bar are posted to a Discord channel
+      as one message (best first, with links). Create a webhook in Discord: channel settings &rarr; Integrations &rarr;
+      Webhooks &rarr; New webhook &rarr; Copy URL. The URL is a secret and is stored in <span class="mono">config/local.yaml</span> only.</p>
+    <div class="form-row">
+      <label><input type="checkbox" id="nt-on"> Send a Discord digest after each refresh</label>
+    </div>
+    <div class="form-row">
+      <label for="nt-url">Webhook URL</label>
+      <input type="password" id="nt-url" autocomplete="off" style="min-width:200px;flex:0 1 420px" placeholder="https://discord.com/api/webhooks/...">
+      <button id="nt-show" type="button">Show</button>
+    </div>
+    <div class="form-row">
+      <label for="nt-min">Min score</label>
+      <input type="number" id="nt-min" min="0" max="100" style="width:80px">
+      <label for="nt-max">Max lines per message</label>
+      <input type="number" id="nt-max" min="1" max="40" style="width:80px">
+      <label for="nt-locs">Locations</label>
+      <input type="text" id="nt-locs" style="width:220px" placeholder="austin, texas, remote_us">
+    </div>
+    <div class="form-row">
+      <button class="primary" id="nt-save">Save</button>
+      <button id="nt-test">Send test</button>
+      <span class="status-line" id="nt-status"></span>
+    </div>
+  </div>
+
+  <p class="help">Scoring weights live in <span class="mono">config/skills.yaml</span> — edit the
+  file and hit <b>Rescore</b> on the Jobs page. Company boards live in
+  <span class="mono">config/companies.yaml</span>. Values saved here are stored in
+  <span class="mono">config/local.yaml</span> on this machine only.</p>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+
+async function load() {
+  const s = await (await fetch('/api/settings')).json();
+  $('az-on').checked = s.adzuna.enabled !== false;
+  $('az-id').value = s.adzuna.app_id || '';
+  $('az-key').value = s.adzuna.app_key || '';
+  const locs = s.adzuna.locations || (s.adzuna.location ? [s.adzuna.location] : []);
+  $('az-locs').value = locs.join('; ');
+  $('ft-tx').checked = s.filters.keep_texas_non_austin !== false;
+  $('ft-us').checked = !!s.filters.keep_us_other_cities;
+  $('ft-global').checked = !!s.filters.keep_remote_global;
+  $('ft-age').value = s.filters.max_age_days || 45;
+  $('ft-age-b').value = s.filters.max_age_days_boards || 60;
+  const ft = s.fit || {};
+  const modelOpts = sel => (s.resume_models || []).map(([id, name]) =>
+    `<option value="${id}"${id === sel ? ' selected' : ''}>${name}</option>`).join('');
+  $('fit-on').checked = ft.enabled !== false;
+  $('fit-model').innerHTML = modelOpts(ft.model);
+  $('fit-pmodel').innerHTML = modelOpts(ft.profile_model);
+  $('fit-think').value = ft.thinking || 'full';
+  $('fit-gate').value = ft.gate_min_score ?? 60;
+  $('fit-par').value = ft.parallel || 2;
+  $('fit-auto').value = ft.auto_profile_after ?? 5;
+  const rfAt = (s.refresh || {}).at;
+  $('rf-at').value = Array.isArray(rfAt) ? rfAt.join(', ') : (rfAt || '');
+  $('rf-every').value = (s.refresh || {}).every_hours || 0;
+  $('rf-workers').value = (s.refresh || {}).board_workers || 8;
+  const rs = s.resume || {};
+  $('rs-model').innerHTML = (s.resume_models || []).map(([id, name]) =>
+    `<option value="${id}"${id === rs.model ? ' selected' : ''}>${name}</option>`).join('');
+  $('rs-dir').value = rs.output_dir || '';
+  $('rs-file').value = rs.file_name || 'Tailored_Resume.docx';
+  $('rs-cmd').value = rs.claude_cmd || 'claude';
+  $('rs-batch').value = rs.batch_max || 10;
+  $('rs-timeout').value = rs.timeout_min || 10;
+  $('rs-par').value = rs.parallel || 2;
+  const ap = s.apply || {};
+  $('ap-mode').value = ap.mode || 'prefill'; $('ap-window').value = ap.window || '06:00-06:30'; $('ap-auto').checked = !!ap.auto_plan;
+  $('ap-unatt').checked = ap.unattended_enabled !== false; $('ap-max').value = ap.max_per_run || 5; $('ap-pause').value = ap.pause_seconds ?? 20;
+  const nt = s.notify || {};
+  $('nt-on').checked = !!nt.enabled; $('nt-url').value = nt.discord_webhook_url || '';
+  $('nt-min').value = nt.min_score ?? 50; $('nt-max').value = nt.max_items || 15;
+  $('nt-locs').value = (nt.loc_classes || []).join(', ');
+}
+
+const ntBody = () => ({ notify: { enabled: $('nt-on').checked, discord_webhook_url: $('nt-url').value.trim(),
+  min_score: parseInt($('nt-min').value) || 0, max_items: parseInt($('nt-max').value) || 15,
+  loc_classes: $('nt-locs').value.split(',').map(x => x.trim()).filter(Boolean) } });
+$('nt-show').onclick = () => { const i = $('nt-url'); i.type = i.type === 'password' ? 'text' : 'password'; };
+$('nt-save').onclick = async () => {
+  const r = await (await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(ntBody()) })).json();
+  flash($('nt-status'), r.ok ? 'Saved.' : (r.error || 'Save failed'), r.ok);
+};
+$('nt-test').onclick = async () => {
+  flash($('nt-status'), 'Sending…', true);
+  const r = await (await fetch('/api/settings/test_notify', { method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ discord_webhook_url: $('nt-url').value.trim() }) })).json();
+  flash($('nt-status'), r.ok ? `Sent (sample of ${r.sample}). Check the channel.` : (r.error || 'Failed'), r.ok);
+};
+
+$('ap-save').onclick = async () => {
+  const r = await (await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ apply: { mode: $('ap-mode').value, window: $('ap-window').value.trim() || '06:00-06:30',
+                                    auto_plan: $('ap-auto').checked, unattended_enabled: $('ap-unatt').checked,
+                                    max_per_run: parseInt($('ap-max').value) || 5, pause_seconds: parseInt($('ap-pause').value) || 0 } }) })).json();
+  flash($('ap-status'), r.ok ? 'Saved.' : (r.error || 'Save failed'), r.ok);
+};
+
+$('rs-save').onclick = async () => {
+  const r = await (await fetch('/api/settings', { method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ resume: {
+      model: $('rs-model').value, output_dir: $('rs-dir').value.trim(),
+      file_name: $('rs-file').value.trim() || 'Tailored_Resume.docx',
+      claude_cmd: $('rs-cmd').value.trim() || 'claude',
+      batch_max: parseInt($('rs-batch').value) || 10,
+      timeout_min: parseInt($('rs-timeout').value) || 10,
+      parallel: Math.max(1, Math.min(3, parseInt($('rs-par').value) || 2)) } }) })).json();
+  flash($('rs-status'), r.ok ? 'Saved. Applies to the next tailoring run.' : (r.error || 'Save failed'), r.ok);
+};
+
+$('rs-test').onclick = async () => {
+  flash($('rs-test-status'), 'Testing (up to ~1 min)…', true);
+  const r = await (await fetch('/api/settings/test_claude', { method: 'POST' })).json();
+  flash($('rs-test-status'), r.ok ? `Claude Code ${r.version} works (signed in).` : (r.error || 'Test failed'), r.ok);
+};
+
+function flash(el, msg, ok) {
+  el.textContent = msg;
+  el.className = 'status-line ' + (ok ? 'badge-ok' : 'badge-err');
+}
+
+$('az-show').onclick = () => {
+  const f = $('az-key');
+  f.type = f.type === 'password' ? 'text' : 'password';
+  $('az-show').textContent = f.type === 'password' ? 'Show' : 'Hide';
+};
+
+$('az-save').onclick = async () => {
+  const locations = $('az-locs').value.split(';').map(x => x.trim()).filter(Boolean);
+  const r = await (await fetch('/api/settings', { method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ adzuna: {
+      enabled: $('az-on').checked, app_id: $('az-id').value.trim(), app_key: $('az-key').value.trim(), locations } }) })).json();
+  flash($('az-status'), r.ok ? 'Saved. Adzuna runs on the next Refresh.' : (r.error || 'Save failed'), r.ok);
+};
+
+$('az-test').onclick = async () => {
+  flash($('az-status'), 'Testing…', true);
+  const r = await (await fetch('/api/settings/test_adzuna', { method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ app_id: $('az-id').value.trim(), app_key: $('az-key').value.trim() }) })).json();
+  flash($('az-status'), r.ok
+    ? `Key works — ${r.count.toLocaleString()} US devops jobs visible.`
+    : (r.error || 'Test failed'), r.ok);
+};
+
+$('ft-save').onclick = async () => {
+  const r = await (await fetch('/api/settings', { method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ filters: {
+      keep_texas_non_austin: $('ft-tx').checked,
+      keep_us_other_cities: $('ft-us').checked,
+      keep_remote_global: $('ft-global').checked,
+      max_age_days: parseInt($('ft-age').value) || 45,
+      max_age_days_boards: parseInt($('ft-age-b').value) || 60 } }) })).json();
+  flash($('ft-status'), r.ok ? 'Saved. Applies on the next Refresh.' : (r.error || 'Save failed'), r.ok);
+};
+
+$('fit-save').onclick = async () => {
+  const r = await (await fetch('/api/settings', { method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ fit: {
+      enabled: $('fit-on').checked, model: $('fit-model').value, profile_model: $('fit-pmodel').value,
+      thinking: $('fit-think').value, gate_min_score: parseInt($('fit-gate').value) || 0,
+      parallel: Math.min(3, Math.max(1, parseInt($('fit-par').value) || 2)),
+      auto_profile_after: Math.max(0, parseInt($('fit-auto').value) || 0) } }) })).json();
+  flash($('fit-status'), r.ok ? 'Saved. Applies to the next scoring run.' : (r.error || 'Save failed'), r.ok);
+};
+$('fit-profile-btn').onclick = async () => {
+  $('fit-profile-btn').disabled = true;
+  flash($('fit-status'), 'Rewriting the profile from pending feedback (one model call)…', true);
+  const r = await (await fetch('/api/fit/profile', { method: 'POST' })).json();
+  $('fit-profile-btn').disabled = false;
+  flash($('fit-status'), r.ok ? (r.changed ? `Profile v${r.version}: ${r.applied} feedback item(s) folded in; ${r.requeued} job(s) re-scoring` : r.note) : (r.error || 'Failed'), r.ok);
+  if (r.changed && $('fit-profile').style.display !== 'none') $('fit-show').onclick();
+};
+$('fit-show').onclick = async () => {
+  const pre = $('fit-profile');
+  if (pre.style.display !== 'none') { pre.style.display = 'none'; return; }
+  const r = await (await fetch('/api/fit/profile')).json();
+  pre.textContent = `# version ${r.version} - resume/fit-profile.md (editable by hand too)\n\n` + r.text;
+  pre.style.display = 'block';
+};
+
+$('rf-save').onclick = async () => {
+  const every = Math.max(0, parseFloat($('rf-every').value) || 0);
+  const at = $('rf-at').value.split(',').map(s => s.trim()).filter(Boolean);
+  const bad = at.filter(s => !/^\d{1,2}:\d{2}$/.test(s) || parseInt(s) > 23 || parseInt(s.split(':')[1]) > 59);
+  if (bad.length) { flash($('rf-status'), `Not a time: ${bad.join(', ')} (use HH:MM, 24h)`, false); return; }
+  const r = await (await fetch('/api/settings', { method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ refresh: {
+      at: at.join(', '),
+      every_hours: every,
+      board_workers: Math.min(16, Math.max(1, parseInt($('rf-workers').value) || 8)) } }) })).json();
+  flash($('rf-status'), r.ok ? (at.length ? `Saved. Refreshes at ${at.join(', ')} while the server runs; the Jobs page shows the next one.`
+                               : every ? `Saved. First scheduled run in ${every}h; the Jobs page shows the time.`
+                                       : 'Saved. Manual refresh only.') : (r.error || 'Save failed'), r.ok);
+};
+
+load();
+</script>
+</body>
+</html>

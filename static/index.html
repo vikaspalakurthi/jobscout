@@ -1,0 +1,1217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JobScout</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="row">
+    <h1>Job<span>Scout</span></h1>
+    <nav>
+      <a href="/" class="active">Jobs</a>
+      <a href="/companies">Companies</a>
+      <a href="/watchlist">Watchlist</a>
+      <a href="/settings">Settings</a>
+      <a href="/about">How it works</a>
+    </nav>
+    <span class="stat" id="stat-line">loading…</span>
+    <span style="flex:1"></span>
+    <span class="refresh-msg" id="refresh-msg"></span>
+    <button id="btn-report" title="Last refresh source report">Report</button>
+    <button id="btn-rescore" title="Re-apply config/skills.yaml to all stored jobs">Rescore</button>
+    <button class="primary" id="btn-refresh">&#8635; Refresh</button>
+  </div>
+  <div class="refresh-prog" id="refresh-prog">
+    <span id="rp-phase"></span>
+    <div class="bar" id="rp-bar"><i></i></div>
+    <span id="rp-count"></span>
+    <span class="last" id="rp-last"></span>
+  </div>
+  <div class="tabs" id="tabs"></div>
+</header>
+
+<div class="filters">
+  <input type="text" id="f-q" placeholder="Search title / company / description…">
+  <label>Min score <input type="range" id="f-min" min="0" max="90" value="0" step="5">
+    <span id="f-min-val">0</span></label>
+  <select id="f-days">
+    <option value="">Any date</option>
+    <option value="1">Last 24h</option>
+    <option value="3">Last 3 days</option>
+    <option value="7">Last 7 days</option>
+    <option value="14">Last 14 days</option>
+    <option value="30">Last 30 days</option>
+  </select>
+  <select id="f-days-by" title="Which date the age filter reads: when the employer first published the posting, or when they last edited it">
+    <option value="posted">by posted</option>
+    <option value="updated">by updated</option>
+  </select>
+  <label title="Only postings inserted by the most recent refresh"><input type="checkbox" id="f-new"> New this refresh</label>
+  <div id="f-loc"></div>
+  <div id="f-mode"></div>
+  <div id="f-role"></div>
+  <input type="text" id="f-company" list="companies-dl" placeholder="Company…" style="width:150px">
+  <datalist id="companies-dl"></datalist>
+  <div id="f-source"></div>
+  <button type="button" class="small" id="f-preset-sre" title="Austin + Texas + US remote, SRE titles only (site / systems / service / platform reliability, production engineer), direct boards, last 30 days">SRE view</button>
+  <select id="f-auth">
+    <option value="">H4-safe (default)</option>
+    <option value="no_sponsorship">Says "no sponsorship"</option>
+    <option value="citizen_only">Citizen-only (excluded)</option>
+    <option value="all">All incl. citizen-only</option>
+  </select>
+  <select id="f-sort">
+    <option value="fit">Sort: fit</option>
+    <option value="score">Sort: keyword score</option>
+    <option value="date">Sort: newest posted</option>
+    <option value="updated">Sort: newest updated</option>
+    <option value="source">Sort: source</option>
+    <option value="auth">Sort: sponsorship</option>
+  </select>
+  <span class="stat" id="result-count"></span>
+  <span style="flex:1"></span>
+  <span class="stat" id="sel-info" style="display:none"></span>
+  <button class="small" id="btn-sel-all" title="Tick every job in the current list">Select all shown</button>
+  <button class="small" id="btn-fit" title="Model fit scores for the ticked jobs, or for every gated job that has none yet">&#9878; Fit-score</button>
+  <button class="tailor-b" id="btn-tailor" title="Tailor a resume for the ticked jobs, or for every job in the current list when none are ticked">&#9998; Tailor resumes</button>
+</div>
+<div class="dialog" id="tailor-dialog"></div>
+
+<main>
+  <div class="report" id="report"></div>
+  <div id="list"></div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const PAGE = 300;   // cards painted per render; building 1,500 cards took ~0.5-0.9 s per click
+let state = { tab: 'inbox', jobs: [], counts: {}, polling: null, selected: new Set(), shown: PAGE };
+
+// ---- multi-select for bulk tailoring (ticked jobs win; none ticked = whole list) ----
+function updateSelection() {
+  const n = state.selected.size, info = $('sel-info');
+  info.style.display = n ? '' : 'none';
+  info.innerHTML = n ? `${n} selected &middot; <a href="#" id="sel-clear">clear</a>` : '';
+  if (n) $('sel-clear').onclick = e => { e.preventDefault(); state.selected.clear(); renderJobs(); };
+  $('btn-tailor').innerHTML = n ? `&#9998; Tailor selected (${n})` : '&#9998; Tailor resumes';
+  const all = state.jobs.length && state.jobs.every(j => state.selected.has(j.id));
+  $('btn-sel-all').textContent = all ? 'Unselect all' : 'Select all shown';
+}
+$('btn-sel-all').onclick = () => {
+  const all = state.jobs.length && state.jobs.every(j => state.selected.has(j.id));
+  state.jobs.forEach(j => all ? state.selected.delete(j.id) : state.selected.add(j.id));
+  renderJobs();
+};
+
+// ---- multi-select dropdowns ----
+const MSELS = {};
+const MSEL_OPTS = {};
+function setMsel(id, vals) {            // programmatic selection (presets); re-renders the widget
+  MSELS[id] = new Set(vals);
+  const o = MSEL_OPTS[id]; if (o) makeMsel(id, o.label, o.options);
+}
+function makeMsel(id, label, options) {
+  MSEL_OPTS[id] = {label, options};
+  if (!MSELS[id]) MSELS[id] = new Set();
+  const el = $(id);
+  el.className = 'msel';
+  el.innerHTML = `<button type="button"></button><div class="msel-menu">` +
+    options.map(o => `<label><input type="checkbox" value="${o.v.replace(/"/g,'&quot;')}"` +
+      `${MSELS[id].has(o.v) ? ' checked' : ''}> ${o.t}</label>`).join('') + `</div>`;
+  const btn = el.querySelector('button');
+  const update = () => {
+    const n = MSELS[id].size;
+    btn.textContent = n ? `${label} (${n})` : label;
+    el.classList.toggle('active', n > 0);
+  };
+  btn.onclick = e => {
+    e.stopPropagation();
+    document.querySelectorAll('.msel.open').forEach(m => m !== el && m.classList.remove('open'));
+    el.classList.toggle('open');
+  };
+  el.querySelector('.msel-menu').onclick = e => e.stopPropagation();
+  el.querySelectorAll('input').forEach(cb => cb.onchange = () => {
+    cb.checked ? MSELS[id].add(cb.value) : MSELS[id].delete(cb.value);
+    update(); loadJobs();
+  });
+  update();
+}
+document.addEventListener('click', () =>
+  document.querySelectorAll('.msel.open').forEach(m => m.classList.remove('open')));
+const mval = id => [...(MSELS[id] || [])].join(',');
+
+makeMsel('f-loc', 'Locations', [
+  {v: 'austin', t: 'Austin'}, {v: 'texas', t: 'Texas (DFW / Houston / SA)'},
+  {v: 'remote_us', t: 'Remote (US)'}, {v: 'unknown', t: 'Unknown'},
+]);
+makeMsel('f-mode', 'Mode', [
+  {v: 'remote', t: 'Remote'}, {v: 'hybrid', t: 'Hybrid'}, {v: 'office', t: 'Office'},
+]);
+makeMsel('f-role', 'Roles', []);
+makeMsel('f-source', 'Sources', [
+  {v: 'direct', t: 'Direct boards (all)'}, {v: 'aggregator', t: 'Aggregators (all)'},
+]);
+
+const TABS = [ ['inbox','Inbox'], ['viewed','Viewed'], ['starred','Starred'],
+               ['saved','Saved'], ['applied','Applied'], ['not_interested','Not interested'],
+               ['hidden','Hidden'], ['all','All'], ['resumes','Resumes'] ];
+
+function rel(ts) {
+  if (!ts) return '';
+  const s = (Date.now() - Date.parse(ts)) / 1000;
+  if (s < 90) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+
+function markViewed(id) {
+  const j = state.jobs.find(x => x.id === id);
+  const firstView = j && !j.viewed_at;
+  if (j) j.viewed_at = new Date().toISOString();
+  fetch(`/api/jobs/${id}/viewed`, { method: 'POST' }).then(() => {
+    if (firstView && state.tabCounts) {
+      state.tabCounts.viewed = (state.tabCounts.viewed || 0) + 1;
+      renderTabs();
+    }
+  });
+}
+
+function esc(s) { return (s ?? '').toString().replace(/[&<>"]/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function scoreClass(s, flags) {
+  if (flags.some(f => f.key === 'citizenship' || f.key === 'itar')) return 's-bad';
+  return s >= 70 ? 's-good' : s >= 45 ? 's-mid' : 's-low';
+}
+
+function renderTabs() {
+  // filter-aware counts from /api/jobs when available; global counts as fallback
+  const src = state.tabCounts || state.counts;
+  $('tabs').innerHTML = TABS.map(([k, label]) => {
+    let n = state.tabCounts ? src[k] : (k === 'all' ? src.total : src[k]);
+    if (k === 'resumes') {           // badge = jobs waiting on your answers
+      const w = (state.resume?.jobs || []).filter(j => j.resume_state === 'needs_answers').length;
+      n = w ? `${w} need answers` : null;
+    }
+    return `<div class="tab ${state.tab===k?'active':''}" data-tab="${k}">${label}` +
+           (n != null ? `<span class="n">${n}</span>` : '') + `</div>`;
+  }).join('');
+  document.querySelectorAll('.tab').forEach(el =>
+    el.onclick = () => { state.tab = el.dataset.tab; renderTabs(); loadJobs(); });
+  document.body.classList.toggle('resumes-mode', state.tab === 'resumes');
+}
+
+const DIRECT_SET = new Set(['greenhouse','lever','ashby','smartrecruiters','workday','amazon','oracle','recruitee','workable','bamboohr','breezy','oraclehcm','phenom','icims']);
+function empLabel(e) {
+  if (!e) return 'n/a';
+  const t = e.toLowerCase().replace(/[_\s-]/g, '');
+  if (t.includes('c2c') || t.includes('corptocorp')) return 'C2C';
+  if (t.includes('1099')) return '1099';
+  if (t.includes('contract')) return 'Contract';
+  if (t.includes('full') || t === 'permanent') return 'Full-time';
+  if (t.includes('part')) return 'Part-time';
+  if (t.includes('intern')) return 'Intern';
+  return e.slice(0, 14);
+}
+function infoCols(j) {
+  const auth = {
+    '': ['OK', 'auth-ok', 'No citizenship/sponsorship restriction found in the posting'],
+    'no_sponsorship': ['No sponsorship', 'auth-note', 'Employer states no sponsorship — fine when you do not need one'],
+    'citizen_only': ['Citizen only', 'auth-bad', 'Citizenship or clearance required'],
+  }[j.work_auth || ''] || ['—', '', ''];
+  const kind = DIRECT_SET.has(j.source) ? 'direct board' : 'aggregator';
+  const locLabel = { austin: 'Austin', remote_us: 'Remote · US', remote_global: 'Remote',
+                     texas: 'Texas', us_other: 'Other US', unknown: '—',
+                     non_us: 'Non-US' }[j.loc_class] || (j.loc_class || '—');
+  return `<div class="info-cols">
+    <div class="info wide"><small>Company</small>
+      <span class="val company-col" title="${esc(j.company)}">${esc(j.company)}</span></div>
+    <div class="info wide"><small>Location</small>
+      <span class="val" title="${esc(j.location)}">${esc(locLabel)}</span>
+      <small class="sub" title="${esc(j.location)}">${esc((j.location || '').slice(0, 28))}</small></div>
+    <div class="info"><small>Job type</small>
+      <span class="val" title="${esc(j.employment_type || 'not stated in posting')}">${esc(empLabel(j.employment_type))}</span></div>
+    <div class="info"><small>Source</small>
+      <span class="val src-badge">${esc(j.source)}</span>
+      <small>${kind}</small></div>
+    <div class="info"><small>Sponsorship</small>
+      <span class="val ${auth[1]}" title="${auth[2]}">${auth[0]}</span></div>
+  </div>`;
+}
+
+// ---- resume tailoring: per-card strip ----
+// Model fit line: reason, gaps and the thumbs that teach resume/fit-profile.md.
+function fitStrip(j) {
+  if (j.fit === null || j.fit === undefined) {
+    return j.fit_state === 'failed' ? `<div class="fit-line err">fit scoring failed: ${esc(j.fit_error || '')}</div>` : '';
+  }
+  const gaps = (j.fit_gaps || []).map(g => `<span class="chip gap">${esc(g)}</span>`).join('');
+  return `<div class="fit-line">
+    <span class="fit-why">${esc(j.fit_reason || '')}</span>${gaps}
+    <span class="fit-fb">
+      <button data-fact="too_high" title="Score is too high - tell the profile why">&#9660; too high</button>
+      <button data-fact="right" title="Score is about right">&#10003;</button>
+      <button data-fact="too_low" title="Score is too low - tell the profile why">&#9650; too low</button>
+    </span>${j.fit_stale ? '<span class="stat" title="Scored under an older fit profile; re-scores on the next Fit-score run">* older profile</span>' : ''}
+  </div>`;
+}
+
+function resumeStrip(j) {
+  const s = j.resume_state || '';
+  if (!s) return '';
+  const when = j.resume_updated_at ? rel(j.resume_updated_at) : '';
+  const map = {
+    queued: `<span class="pill wait">queued</span><b>Waiting for its turn</b><span class="stat">${when}</span>`,
+    analyzing: `<span class="spin"></span><b>Analyzing the job description&#8230;</b><span class="stat">started ${when}</span>`,
+    generating: `<span class="spin"></span><b>Generating resume&#8230;</b><span class="stat">usually 1&#8211;4 min &middot; started ${when}</span>`,
+    needs_answers: `<span class="pill q">${j.resume_question_count} question${j.resume_question_count===1?'':'s'}</span><b>Waiting for your answers</b><span class="grow"></span>
+      <button class="small primary" data-ract="answers">Answer in Resumes tab &#8594;</button>
+      <button class="small" data-ract="skip" title="Generate now; unanswered questions are simply not claimed">Skip questions</button>`,
+    ready: `<span class="pill ok">Resume ready</span><span class="stat">${when}</span><span class="grow"></span>
+      <button class="small ok" data-ract="open">Open resume</button>
+      <button class="small" data-ract="folder">Open folder</button>
+      <button class="small" data-ract="notes">Notes</button>
+      <button class="small" data-ract="regen" title="Previous version is kept in history/">Regenerate</button>
+      <button class="small" data-ract="cover-panel">Cover letter${extraBadge(j.resume_cover)}</button>
+      <button class="small" data-ract="qa-panel">Application Q&amp;A${extraBadge(j.resume_qa)}</button>
+      ${j.apply_state ? `<span class="pill ${APPLY_PILL[j.apply_state] || 'wait'}" title="Apply pipeline">${esc(j.apply_state.replace('_', ' '))}</span>`
+        : j.status === 'applied' || j.work_auth === 'citizen_only' ? ''
+        : `<button class="small" data-ract="plan" title="Read the application form and map every field to a value">Plan apply</button>`}`,
+    failed: `<span class="pill fail">Failed</span><span class="stat" title="${esc(j.resume_error)}">${esc((j.resume_error||'').slice(0,90))}</span><span class="grow"></span>
+      <button class="small" data-ract="retry">Retry</button>`,
+  };
+  const timeline = phaseChips(state.resume?.jobs?.find(x => x.id === j.id)?.phases);
+  return `<div class="rs">${map[s] || esc(s)}${timeline}</div><div class="notes-box" id="notes-${j.id}" style="display:none"></div>
+          <div class="extra" id="extra-${j.id}" style="display:none"></div>`;
+}
+const APPLY_PILL = { planned: 'run', needs_input: 'q', approved: 'ok', skipped: 'wait', failed: 'fail',
+                     held: 'q', submitted: 'ok', prefilled: 'run', filling: 'run' };
+function extraBadge(x) {
+  const s = x?.state; if (!s) return '';
+  return ' ' + ({ queued: '&#8987;', running: '<span class="spin"></span>', ready: '&#10003;',
+                  failed: '<span style="color:var(--bad)">!</span>' }[s] || '');
+}
+
+// ---- resume extras: application Q&A + cover letter panels ----
+state.openExtra = {};          // job id -> 'qa' | 'cover'
+function renderExtra(id) {
+  const box = $(`extra-${id}`); if (!box) return;
+  const kind = state.openExtra[id];
+  if (!kind) { box.style.display = 'none'; return; }
+  const j = state.jobs.find(x => x.id === id);
+  const x = (kind === 'qa' ? j.resume_qa : j.resume_cover) || {};
+  const busy = x.state === 'queued' || x.state === 'running';
+  const statusLine = busy ? `<div class="status"><span class="spin"></span> ${x.state === 'queued' ? 'Queued' : 'Writing'}&#8230; usually 1&#8211;3 min</div>`
+    : x.state === 'failed' ? `<div class="status" style="color:var(--bad)">Failed: ${esc(x.error || '')}</div>`
+    : x.state === 'ready' ? `<div class="status stat">Ready ${rel(x.updated_at)}${x.summary ? ` &middot; ${esc(x.summary.slice(0, 200))}` : ''}</div>` : '';
+  const copyBtn = txt => `<button class="small" data-copy="${esc(txt)}">Copy</button>`;
+  let html;
+  if (kind === 'qa') {
+    const qsText = (x.questions || []).map(q => q.text + (q.limit ? ` (limit: ${q.limit})` : '')).join('\n');
+    html = `<h4>Application questions</h4>
+      <p class="help">Paste each question from the form on its own line; add "(limit: 200 words)" or "(limit: 1000 characters)" where the form says so. Answers follow the writing guide and use only what is in your resume, notes and inventory.</p>
+      <div class="row"><textarea class="x-q" placeholder="Why do you want to work at CrowdStrike? (limit: 200 words)&#10;Why are you interested in this role?">${esc(qsText)}</textarea></div>
+      <div class="row"><input type="text" class="x-notes" placeholder="Anything true you want used (optional, this application only): e.g. used Falcon at Freddie Mac" value="${esc(x.notes || '')}"></div>
+      <div class="row"><button class="small primary" data-xact="qa" ${busy ? 'disabled' : ''}>${x.answers ? 'Regenerate answers' : 'Draft answers'}</button> ${statusLine}</div>`;
+    (x.answers || []).forEach(a => html += `<div class="ans-block"><div class="qh">${esc(a.question)}</div>
+        <div class="ver"><span class="tag">Long</span><pre>${esc(a.long)}</pre>${copyBtn(a.long)}</div>
+        <div class="ver"><span class="tag">Short</span><pre>${esc(a.short)}</pre>${copyBtn(a.short)}</div></div>`);
+    if (x.answers) html += `<div class="row"><textarea class="x-fb" placeholder="Feedback for a regenerate (optional): e.g. Q1 too long, lead with Kafka; drop the Austin line">${esc(x.feedback || '')}</textarea></div>`;
+  } else {
+    html = `<h4>Cover letter</h4>
+      <p class="help">One page (long) and a short version for small text boxes, matching the resume that was sent. Same writing rules; nothing invented.</p>
+      <div class="row"><input type="text" class="x-notes" placeholder="Anything true you want in it (optional, this application only)" value="${esc(x.notes || '')}"></div>
+      <div class="row"><button class="small primary" data-xact="cover" ${busy ? 'disabled' : ''}>${x.path ? 'Regenerate letter' : 'Generate letter'}</button>
+        ${x.path ? `<button class="small ok" data-ract="cover-open">Open long</button><button class="small" data-ract="cover-open-short">Open short</button>` : ''} ${statusLine}</div>`;
+    if (x.text) {
+      const m = x.text.match(/## Long\s*([\s\S]*?)(?:## Short\s*([\s\S]*))?$/);
+      // preview the body only: drop the "# Name" heading and the contact line under it
+      const strip = s => (s || '').split('\n').filter(l => l.trim()).filter((l, i) => !(i === 0 && l.startsWith('# ')) && !(i === 1 && l.includes('|'))).join('\n\n').trim();
+      if (m) html += `<div class="ans-block"><div class="ver"><span class="tag">Long</span><pre>${esc(strip(m[1]))}</pre>${copyBtn(strip(m[1]))}</div>
+        <div class="ver"><span class="tag">Short</span><pre>${esc(strip(m[2]))}</pre>${copyBtn(strip(m[2]))}</div></div>`;
+      html += `<div class="row"><textarea class="x-fb" placeholder="Feedback for a regenerate (optional): e.g. shorter opening, mention the Austin office, less about Apple">${esc(x.feedback || '')}</textarea></div>`;
+    }
+  }
+  box.innerHTML = html; box.style.display = 'block';
+  const drafts = state.extraDrafts?.[id]; if (drafts) {
+    box.querySelectorAll('textarea, input').forEach(el => { if (drafts[el.className] != null) el.value = drafts[el.className]; });
+  }
+  box.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => navigator.clipboard.writeText(b.dataset.copy)
+    .then(() => { b.textContent = 'Copied'; setTimeout(() => b.textContent = 'Copy', 1500); }).catch(() => {}));
+  box.querySelectorAll('[data-ract]').forEach(b => b.onclick = () => resumeAction(id, b.dataset.ract));
+  box.querySelectorAll('[data-xact]').forEach(b => b.onclick = async () => {
+    const body = { notes: box.querySelector('.x-notes').value, feedback: box.querySelector('.x-fb')?.value || '' };
+    if (b.dataset.xact === 'qa') {
+      body.questions = box.querySelector('.x-q').value.split('\n').map(s => s.trim()).filter(Boolean).map(line => {
+        const lm = line.match(/\((?:limit|max)[:\s]+([^)]+)\)\s*$/i);
+        return { text: lm ? line.slice(0, lm.index).trim() : line, limit: lm ? lm[1].trim() : '' };
+      });
+      if (!body.questions.length) { $('refresh-msg').textContent = 'Paste at least one question.'; return; }
+    }
+    b.disabled = true;
+    const r = await (await fetch(`/api/jobs/${id}/resume/${b.dataset.xact}`, { method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) })).json();
+    if (!r.ok) $('refresh-msg').textContent = r.error || 'Failed';
+    delete (state.extraDrafts || {})[id];
+    loadJobs(); pollResume(true);
+  });
+}
+function captureExtraDrafts() {
+  state.extraDrafts = {};
+  Object.keys(state.openExtra).forEach(id => {
+    const box = $(`extra-${id}`); if (!box) return;
+    const d = {}; box.querySelectorAll('textarea, input').forEach(el => d[el.className] = el.value);
+    state.extraDrafts[id] = d;
+  });
+}
+
+async function resumeAction(id, act) {
+  const post = (url, body) => fetch(url, { method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {}) });
+  if (act === 'tailor' || act === 'regen') {
+    const r = await (await post('/api/resume/start', { job_ids: [id], regenerate: act === 'regen',
+                                                        include_applied: true })).json();
+    if (!r.queued.length) $('refresh-msg').textContent =
+      'Not queued: ' + Object.entries(r.skipped).filter(([,n]) => n).map(([k]) => k.replace('_',' ')).join(', ');
+  } else if (act === 'retry') await post(`/api/jobs/${id}/resume/retry`);
+  else if (act === 'skip') await post(`/api/jobs/${id}/resume/retry`, { skip_questions: true });
+  else if (act === 'restore') await post(`/api/jobs/${id}/apply/review`, { action: 'reset' });   // un-skip a plan
+  else if (act === 'drop') {                    // status change; the server drops it from both pipelines
+    await post(`/api/jobs/${id}/status`, { status: 'not_interested' });
+    const j = state.jobs.find(x => x.id === id); if (j) j.status = 'not_interested';
+    $('refresh-msg').textContent = 'Marked not interested - removed from the Resumes tab (Not interested tab in Jobs has it)';
+  }
+  else if (act === 'open') await post(`/api/jobs/${id}/resume/open`, { what: 'file' });
+  else if (act === 'folder') await post(`/api/jobs/${id}/resume/open`, { what: 'folder' });
+  else if (act === 'plan') {
+    $('refresh-msg').textContent = 'Reading the application form…';
+    const r = await (await post('/api/apply/plan', { job_ids: [id] })).json();
+    $('refresh-msg').textContent = r.planned.length ? 'Plan ready - review it in the Resumes tab' : ('Plan failed: ' + Object.values(r.failed)[0]);
+  }
+  else if (act === 'cover-open') { await post(`/api/jobs/${id}/resume/open`, { what: 'cover' }); return; }
+  else if (act === 'cover-open-short') { await post(`/api/jobs/${id}/resume/open`, { what: 'cover_short' }); return; }
+  else if (act === 'qa-panel' || act === 'cover-panel') {
+    const kind = act === 'qa-panel' ? 'qa' : 'cover';
+    state.openExtra[id] = state.openExtra[id] === kind ? null : kind;
+    renderExtra(id); return;
+  }
+  else if (act === 'answers') { state.tab = 'resumes'; renderTabs(); loadJobs(); return; }
+  else if (act === 'notes') {
+    const box = $(`notes-${id}`);
+    if (box.style.display === 'block') { box.style.display = 'none'; return; }
+    const r = await (await fetch(`/api/jobs/${id}/resume/notes`)).json();
+    box.textContent = r.notes || 'No notes.'; box.style.display = 'block'; return;
+  }
+  loadJobs(); pollResume(true);
+}
+
+// ---- resume tailoring: batch button + confirm dialog ----
+$('btn-tailor').onclick = () => {
+  const dlg = $('tailor-dialog');
+  if (dlg.classList.contains('open')) { dlg.classList.remove('open'); return; }
+  const picked = state.selected.size > 0;
+  const jobs = picked ? state.jobs.filter(j => state.selected.has(j.id)) : state.jobs;
+  const n = {
+    citizen: jobs.filter(j => j.work_auth === 'citizen_only').length,
+    applied: jobs.filter(j => j.status === 'applied').length,
+    ready: jobs.filter(j => j.resume_state === 'ready').length,
+    busy: jobs.filter(j => ['queued','analyzing','generating'].includes(j.resume_state)).length,
+  };
+  const max = state.resume?.batch_max || 10;
+  const eligible = () => jobs.filter(j => j.work_auth !== 'citizen_only'
+    && (j.status !== 'applied' || $('td-applied').checked)
+    && (j.resume_state !== 'ready' || $('td-regen').checked)
+    && !['queued','analyzing','generating'].includes(j.resume_state)).length;
+  dlg.innerHTML = `<h4>Tailor resumes for ${picked ? `the ${jobs.length} selected job${jobs.length===1?'':'s'}` : `all ${jobs.length} job${jobs.length===1?'':'s'} in this list`}?</h4>
+    <ul>
+      <li>Runs one job at a time in the background (roughly 2&#8211;5 min each). You can keep using JobScout.</li>
+      <li>Uses your Claude Max usage. Max ${max} jobs per click (Settings).</li>
+      ${n.citizen ? `<li>${n.citizen} citizen-only job(s) will be skipped.</li>` : ''}
+      ${n.busy ? `<li>${n.busy} already in progress will be skipped.</li>` : ''}
+      ${n.ready ? `<li>${n.ready} already have a resume &mdash; skipped unless you tick "Regenerate existing".</li>` : ''}
+      ${n.applied ? `<li>${n.applied} marked applied &mdash; skipped unless you tick "Include applied".</li>` : ''}
+    </ul>
+    <label><input type="checkbox" id="td-regen"> Regenerate existing</label>
+    <label><input type="checkbox" id="td-applied"> Include applied</label>
+    <div class="row"><button id="td-cancel">Cancel</button>
+      <button class="primary" id="td-start">Start <span id="td-n"></span></button></div>`;
+  const upd = () => { const e = Math.min(eligible(), max); $('td-n').textContent = e ? `${e} job${e===1?'':'s'}` : ''; $('td-start').disabled = !e; };
+  $('td-regen').onchange = $('td-applied').onchange = upd; upd();
+  $('td-cancel').onclick = () => dlg.classList.remove('open');
+  $('td-start').onclick = async () => {
+    const r = await (await fetch('/api/resume/start', { method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ job_ids: jobs.map(j => j.id), regenerate: $('td-regen').checked,
+                             include_applied: $('td-applied').checked }) })).json();
+    dlg.classList.remove('open');
+    state.selected.clear();
+    $('refresh-msg').textContent = `Queued ${r.queued.length} job(s) for tailoring`;
+    loadJobs(); pollResume(true);
+  };
+  dlg.classList.add('open');
+};
+
+// ---- resume tailoring: status polling (drives card strips + Resumes tab) ----
+async function pollResume(force) {
+  let r, a;
+  try { [r, a] = await Promise.all([fetch('/api/resume/status').then(x => x.json()),
+                                    fetch('/api/apply/status').then(x => x.json())]); }
+  catch (e) {                      // server restarting: keep polling, don't die
+    clearTimeout(state.resumeTimer); state.resumeTimer = setTimeout(pollResume, 5000); return;
+  }
+  const strip = x => JSON.stringify({ ...x, queue: { ...x.queue, message: '', log: [], workers: {} } });
+  const changed = strip(r) !== strip(state.resume || {}) || JSON.stringify(a) !== JSON.stringify(state.apply || {});
+  state.resume = r; state.apply = a;
+  renderTabs();
+  const active = r.queue.queued > 0 || r.queue.running > 0;
+  if (state.tab === 'resumes') {
+    if (changed) renderResumes();            // never wipe drafts needlessly
+    else if (active) {                       // just refresh the live panel (no inputs inside it)
+      const el = document.querySelector('.pipe'), by = s => r.jobs.filter(j => j.resume_state === s).length;
+      if (el) { el.outerHTML = pipelinePanel(r, by('needs_answers'), 0, by('ready'), by('failed')); bindPipeline(r); }
+    }
+  }
+  else if (active || force) {
+    // refresh visible cards whose state changed since the last render
+    const byId = Object.fromEntries(r.jobs.map(j => [j.id, j]));
+    const differs = j => byId[j.id] && (byId[j.id].resume_state !== j.resume_state
+      || byId[j.id].resume_qa_state !== (j.resume_qa?.state || '')
+      || byId[j.id].resume_cover_state !== (j.resume_cover?.state || ''));
+    if (state.jobs.some(differs)) loadJobs();
+  }
+  clearTimeout(state.resumeTimer);
+  state.resumeTimer = setTimeout(pollResume, active ? 3000 : 15000);
+}
+
+// ---- resume tailoring: Resumes tab ----
+// ---- resume tailoring: pipeline panel (workers, queue, stats, log) ----
+function fmtSecs(s) {
+  if (s == null) return '—';
+  s = Math.round(s); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+}
+function elapsed(ts) { return ts ? fmtSecs((Date.now() - Date.parse(ts)) / 1000) : ''; }
+function phaseChips(phases) {
+  // phases: [{phase, seconds, ok, started}] = the last run of each phase for this job
+  const order = ['analyze', 'generate', 'answer', 'cover'];
+  if (!phases || !phases.length) return '';
+  return `<div class="phases">` + phases.slice().sort((a, b) => order.indexOf(a.phase) - order.indexOf(b.phase))
+    .map(p => p.ok == null ? `<span class="now">${p.phase} ${elapsed(p.started)}</span>`
+            : `<span class="${p.ok ? 'done' : 'bad'}">${p.phase} ${fmtSecs(p.seconds)}</span>`).join('') + `</div>`;
+}
+function pipelinePanel(r, nWaiting, nQuestions, nReady, nFailed) {
+  const q = r.queue, avg = q.stats?.avg || {};
+  const typical = { analyze: avg.analyze || 45, generate: avg.generate || 150, answer: avg.answer || 110, cover: avg.cover || 130 };
+  const slots = [];
+  for (let w = 1; w <= Math.max(q.parallel, Object.keys(q.workers).length); w++) {
+    const s = q.workers[String(w)];
+    if (!s || !s.job_id) { slots.push(`<div class="slot idle">Worker ${w} &middot; ${w > q.parallel ? 'retiring' : 'idle'}</div>`); continue; }
+    const secs = (Date.now() - Date.parse(s.phase_started || s.started)) / 1000;
+    const pct = Math.min(96, Math.round(100 * secs / (typical[s.phase] || 120)));
+    slots.push(`<div class="slot"><div class="stat">Worker ${w} &middot; <span class="spin"></span> ${esc(s.phase)} &middot; ${fmtSecs(secs)}</div>
+      <div class="t">${esc(s.name || s.job_id)}</div>
+      <div class="bar"><i style="width:${pct}%"></i></div>
+      <div class="stat">${esc(s.task)} &middot; typical ${esc(s.phase)}: ${fmtSecs(typical[s.phase])}</div></div>`);
+  }
+  const queue = q.queue.map((it, i) => `<div class="qitem"><span class="pos">${i + 1}</span><span class="pill wait">queued</span>
+      <b>${esc(it.name)}</b><span class="stat">${esc(it.task === 'resume' ? 'resume' : it.task === 'qa' ? 'Q&A' : 'cover letter')}</span><span style="flex:1"></span>
+      ${i > 0 ? `<button class="small" data-q="front" data-id="${it.job_id}" data-task="${it.task}">&#8593; Front</button>` : ''}
+      <button class="small" data-q="remove" data-id="${it.job_id}" data-task="${it.task}">Remove</button></div>`).join('');
+  const st = q.stats || {};
+  const pf = state.pipeFilter;
+  const pill = (s, cls, label) => `<span class="pill ${cls} clickable ${pf === s ? 'on' : ''}" data-pf="${s}" title="Click to filter the lists below">${label}</span>`;
+  return `<div class="pipe">
+    <div class="head"><b class="title">Pipeline</b>
+      ${pill('running', 'run', `${q.running} running`)}${pill('queued', 'wait', `${q.queued} queued`)}
+      ${pill('needs_answers', 'q', `${nWaiting} need answers`)}${pill('ready', 'ok', `${nReady} ready`)}${pill('failed', 'fail', `${nFailed} failed`)}
+      <span class="stat">${esc(q.message || '')}${pf ? ` &middot; showing ${esc(pf.replace('_',' '))} only` : ''}</span><span style="flex:1"></span>
+      <span class="stepper stat">Parallel runs <button class="small" data-par="-1">&minus;</button><b>${q.parallel}</b><button class="small" data-par="1">+</button></span>
+      <button class="small" id="btn-pause">${q.paused ? '&#9654; Resume queue' : '&#10074;&#10074; Pause queue'}</button></div>
+    <div class="slots">${slots.join('')}</div>
+    ${queue ? `<div class="qlist">${queue}</div>` : ''}
+    <div class="kpis">
+      <div class="kpi"><b>${st.ready_today ?? 0}</b><small>ready today</small></div>
+      <div class="kpi"><b>${fmtSecs(avg.analyze)}</b><small>avg analyze</small></div>
+      <div class="kpi"><b>${fmtSecs(avg.generate)}</b><small>avg generate</small></div>
+      <div class="kpi"><b>${st.failed_today ?? 0}</b><small>failed today</small></div>
+      <div class="kpi"><b>${q.queued || q.running ? '~' + fmtSecs(q.eta_seconds) : '—'}</b><small>queue ETA</small></div>
+    </div>
+    ${(q.log || []).length ? `<div class="plog">${esc(q.log.slice().reverse().join('\n'))}</div>` : ''}
+  </div>`;
+}
+function bindPipeline(r) {
+  const postJ = (url, body) => fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+  const el = document.querySelector('.pipe'); if (!el) return;
+  el.querySelectorAll('[data-pf]').forEach(p => p.onclick = () => {
+    state.pipeFilter = state.pipeFilter === p.dataset.pf ? null : p.dataset.pf; renderResumes();
+  });
+  el.querySelectorAll('[data-par]').forEach(b => b.onclick = async () => {
+    await postJ('/api/resume/parallel', { n: r.queue.parallel + (+b.dataset.par) }); pollResume(true);
+  });
+  el.querySelectorAll('[data-q]').forEach(b => b.onclick = async () => {
+    await postJ('/api/resume/queue', { job_id: +b.dataset.id, task: b.dataset.task, action: b.dataset.q }); pollResume(true);
+  });
+  $('btn-pause').onclick = async () => {
+    await postJ('/api/resume/pause', { paused: !r.queue.paused }); pollResume(true);
+  };
+}
+
+// ---- apply pipeline, stage 1: plans + review panel ----
+state.openPlan = {};          // job id -> true when its review table is expanded
+function fieldEditor(f, id) {
+  const v = f.value, k = esc(f.key), disabled = f.type === 'input_file' || f.type === 'File';
+  if (disabled) return `<span class="stat">${v ? esc(String(v).split(/[\\/]/).pop()) : '—'}</span>`;
+  if (f.options && f.options.length) {
+    // "select all that apply" questions come as multi_value_multi_select (Greenhouse), MultiValueSelect
+    // (Ashby) or a list value; render them as checkboxes so several answers can be ticked
+    const multi = Array.isArray(v) || /multi_value_multi|MultiValue|multiple|checkbox/i.test(f.type || '') || /select all that apply/i.test(f.label || '');
+    if (multi) {
+      const sel = Array.isArray(v) ? v : (v ? [v] : []);
+      return `<div class="multi" data-fk-group="${k}">` + f.options.map(o =>
+        `<label><input type="checkbox" data-fk="${k}" data-multi="1" value="${esc(o)}" ${sel.includes(o) ? 'checked' : ''}> ${esc(o)}</label>`).join('') + `</div>`;
+    }
+    return `<select data-fk="${k}"><option value="">—</option>` +
+      f.options.map(o => `<option ${v === o ? 'selected' : ''}>${esc(o)}</option>`).join('') + `</select>`;
+  }
+  if (typeof v === 'boolean' || f.type === 'Boolean')
+    return `<select data-fk="${k}" data-bool="1"><option value="">—</option><option value="true" ${v === true ? 'selected' : ''}>Yes</option><option value="false" ${v === false ? 'selected' : ''}>No</option></select>`;
+  const long = typeof v === 'string' && v.length > 80;
+  return long ? `<textarea data-fk="${k}" rows="4">${esc(v)}</textarea>`
+              : `<input type="text" data-fk="${k}" value="${esc(v == null ? '' : v)}">`;
+}
+function applyPanel(a) {
+  if (!a) return '';
+  const jobs = a.jobs || [];
+  const n = s => jobs.filter(j => j.apply_state === s).length;
+  const plannable = j => j.resume_state === 'ready' && j.status !== 'applied' && !jobs.find(x => x.id === j.id);
+  const readyNoPlan = (state.resume?.jobs || []).filter(plannable).length;
+  const af = state.applyFilter;
+  const pill = (s, cls, label) => `<span class="pill ${cls} clickable ${af === s ? 'on' : ''}" data-af="${s}" title="Click to filter">${label}</span>`;
+  const lr = a.queue?.last_run;
+  let html = `<div class="pipe apply-panel">
+    <div class="head"><b class="title">Apply</b>
+      ${pill('planned', 'run', `${n('planned')} planned`)}${pill('needs_input', 'q', `${n('needs_input')} need input`)}
+      ${pill('approved', 'ok', `${n('approved')} approved`)}${pill('queued', 'wait', `${n('queued')} queued`)}
+      ${n('filling') ? pill('filling', 'run', `${n('filling')} filling`) : ''}${n('prefilled') ? pill('prefilled', 'run', `${n('prefilled')} prefilled`) : ''}
+      ${n('held') ? pill('held', 'q', `${n('held')} held`) : ''}${pill('submitted', 'ok', `${n('submitted')} submitted`)}
+      ${n('skipped') ? pill('skipped', 'wait', `${n('skipped')} skipped`) : ''}${n('failed') ? pill('failed', 'fail', `${n('failed')} failed`) : ''}
+      <span class="stat">${af ? `showing ${esc(af.replace('_',' '))} only` : ''}</span><span style="flex:1"></span>
+      ${readyNoPlan ? `<button class="small" data-apply="plan-ready">Plan ${readyNoPlan} ready job${readyNoPlan===1?'':'s'}</button>` : ''}
+      ${n('planned') ? `<button class="small" data-apply="approve-all">Approve all planned (${n('planned')})</button>` : ''}
+      ${n('approved') ? `<button class="small primary" data-apply="apply-all">Apply all approved (${n('approved')})</button>` : ''}
+    </div>`;
+  html += `<div class="stat" style="margin:-4px 0 8px">Plan &rarr; review &rarr; approve &rarr; <b>Apply now</b> (or Apply all approved) puts a plan in the queue. Queued plans are filled in your Chrome by the <code>/apply-queue</code> skill: run it in a Claude session, or let the scheduled task run it (prefill at ${esc(a.settings?.window || '06:00')}, unattended at night). Prefill = the tab is left on the review page for your Submit; unattended = submitted only when the live form matches the approved plan exactly.${a.settings?.unattended_enabled === false ? ' <b>Unattended is switched off in Settings - everything runs as prefill.</b>' : ''}${lr ? ` Last run: ${rel(lr.finished || lr.started)}, ${esc(lr.outcome || 'running')} (${esc(lr.runner || '')}).` : ''}</div>`;
+  if (!jobs.length) html += `<div class="stat">No application plans yet.</div>`;
+  else if (!af && jobs.every(j => j.apply_state === 'submitted')) html += `<div class="stat">Nothing in flight - ${n('submitted')} submitted (see the Applied tab, or click the pill).</div>`;
+  // submitted applications live in the Applied tab; here they only count toward the pill (click it to list them)
+  jobs.filter(j => af ? j.apply_state === af : j.apply_state !== 'submitted').forEach(j => {
+    const p = j.plan || {}, open = state.openPlan[j.id];
+    const flags = (p.flags || []).map(f => `<span class="chip note">${esc(f)}</span>`).join('');
+    html += `<div class="qcard" style="margin-top:10px">
+      <div class="head"><span class="pill ${APPLY_PILL[j.apply_state] || 'wait'}">${esc(j.apply_state.replace('_',' '))}</span>
+        <span class="t"><a href="${esc(p.apply_url || j.url)}" target="_blank" rel="noopener">${esc(j.company)} &mdash; ${esc(j.title)} &#8599;</a></span>
+        <span class="stat">${esc(p.ats || '')} &middot; ${(p.fields||[]).length} fields &middot; ${j.needs ? `<b style="color:var(--mid)">${j.needs} unresolved</b>` : 'all resolved'} &middot; ${rel(j.apply_updated_at)}${j.queue_pos ? ` &middot; queue position ${j.queue_pos}` : ''}${j.apply_state === 'prefilled' ? ' &middot; <b>tab open in Chrome, waiting for your Submit</b>' : ''}${j.apply_state === 'held' || j.apply_state === 'failed' ? ` &middot; <span style="color:var(--bad)">${esc(j.apply_error || j.last_run?.reason || '')}</span>` : ''}${j.apply_state === 'submitted' && j.last_run ? ` &middot; ${esc(j.last_run.mode)} &middot; ${esc((j.last_run.finished || '').replace('T',' ').slice(0,16))}` : ''}</span>
+        ${['prefilled','held','submitted'].includes(j.apply_state) ? `<a class="shot-link" href="/api/jobs/${j.id}/apply/screenshot/${j.apply_state === 'submitted' ? 'confirmation' : j.apply_state === 'held' ? 'held' : 'filled'}" target="_blank" title="Screenshot from the filler"><img src="/api/jobs/${j.id}/apply/screenshot/${j.apply_state === 'submitted' ? 'confirmation' : j.apply_state === 'held' ? 'held' : 'filled'}" alt="" onerror="this.parentElement.style.display='none'"></a>` : ''}
+        <span style="flex:1"></span>
+        ${j.apply_state === 'approved' ? `<button class="small primary" data-apply="enqueue" data-id="${j.id}" title="Put this plan in the filler's queue">Apply now</button>` : ''}
+        ${j.apply_state === 'queued' ? `<button class="small" data-apply="dequeue" data-id="${j.id}">Remove from queue</button>` : ''}
+        ${j.apply_state === 'prefilled' ? `<button class="small ok" data-apply="mark-submitted" data-id="${j.id}" title="You clicked Submit in the tab">Mark submitted</button><button class="small" data-apply="enqueue" data-id="${j.id}">Re-queue</button>` : ''}
+        ${j.apply_state === 'held' || j.apply_state === 'failed' ? `<button class="small" data-apply="enqueue" data-id="${j.id}">Retry</button>${j.apply_state === 'held' ? `<button class="small ok" data-apply="mark-submitted" data-id="${j.id}" title="You finished and submitted it by hand">Mark submitted</button>` : ''}<button class="small" data-apply="skip" data-id="${j.id}" title="Give up on this application (keeps the plan for reference)">Skip</button>` : ''}
+        ${j.apply_state === 'submitted' ? `<button class="small" data-ract="folder" data-id="${j.id}">Open folder</button>` : ''}
+        ${(() => { const locked = ['hcaptcha','recaptcha'].includes(p.captcha) || !(a.settings?.allowed_ats || []).includes(p.ats);
+          const finished = ['submitted','filling'].includes(j.apply_state);
+          return `<select class="small" data-mode="${j.id}" ${finished ? 'disabled title="already ' + esc(j.apply_state) + ' - mode is history now"' : locked ? 'disabled title="captcha / board not eligible: prefill only"' : 'title="How this application will be executed"'}>
+            <option value="prefill" ${p.mode !== 'unattended' ? 'selected' : ''}>Prefill - I click Submit</option>
+            <option value="unattended" ${p.mode === 'unattended' ? 'selected' : ''}>Unattended submit</option></select>`; })()}
+        <button class="small" data-apply="toggle" data-id="${j.id}">${open ? 'Hide' : 'Review'}</button>
+        ${['planned','needs_input','failed'].includes(j.apply_state) ? `<button class="small ok" data-apply="approve" data-id="${j.id}" ${j.needs ? 'disabled title="resolve the open fields first"' : ''}>Approve</button>` : ''}
+        ${j.apply_state === 'approved' ? `<button class="small" data-apply="reset" data-id="${j.id}">Un-approve</button>` : ''}
+        ${['planned','needs_input','approved'].includes(j.apply_state) ? `<button class="small" data-apply="skip" data-id="${j.id}">Skip</button>` : j.apply_state === 'skipped' ? `<button class="small" data-apply="reset" data-id="${j.id}">Restore</button>` : ''}
+        ${['planned','needs_input','approved','held','failed'].includes(j.apply_state) ? `<button class="small" data-apply="replan" data-id="${j.id}" title="Re-read the form (keeps your fixes)">Re-plan</button>` : ''}
+        ${(p.fields||[]).some(f => f.source === 'answer' && f.value == null) ? `<button class="small" data-apply="draft" data-id="${j.id}">Draft answers</button>` : ''}
+        ${['queued','filling','prefilled','held','submitted','failed'].includes(j.apply_state) && p.apply_url ? `<a class="small btn-link" href="${esc(p.apply_url)}" target="_blank" rel="noopener">Open form &#8599;</a>` : ''}
+      </div>
+      ${flags ? `<div class="chips">${flags}</div>` : ''}
+      ${j.apply_error ? `<div class="stat" style="color:var(--bad)">${esc(j.apply_error)}</div>` : ''}
+      ${open ? `<div class="tbl"><table class="plan"><tr><th>Field</th><th>Value the filler will use</th><th>From</th></tr>` +
+        (p.fields||[]).map(f => `<tr class="${f.value == null && (f.required || f.source === 'answer') ? 'need' : ''}">
+          <td>${esc(f.label)}${f.required ? ' <span class="stat">*</span>' : ''}</td>
+          <td>${fieldEditor(f, j.id)}</td>
+          <td class="stat">${esc(f.source)}${f.note ? ` &middot; ${esc(f.note)}` : ''}</td></tr>`).join('') +
+        `</table></div><div class="qbar"><span class="stat">Edit any value, then</span><button class="small primary" data-apply="save" data-id="${j.id}">Save fixes</button></div>` : ''}
+    </div>`;
+  });
+  return html + `</div>`;
+}
+function bindApply() {
+  const postJ = (url, body) => fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) }).then(r => r.json());
+  const el = document.querySelector('.apply-panel'); if (!el) return;
+  el.querySelectorAll('[data-af]').forEach(p => p.onclick = () => {
+    state.applyFilter = state.applyFilter === p.dataset.af ? null : p.dataset.af; renderResumes();
+  });
+  el.querySelectorAll('select[data-mode]').forEach(s => s.onchange = async () => {
+    await postJ(`/api/jobs/${s.dataset.mode}/apply/review`, { action: 'fix', mode: s.value }); pollResume(true);
+  });
+  el.querySelectorAll('[data-apply]').forEach(b => b.onclick = async () => {
+    const act = b.dataset.apply, id = +b.dataset.id;
+    if (act === 'toggle') { state.openPlan[id] = !state.openPlan[id]; renderResumes(); return; }
+    if (act === 'plan-ready') {
+      const ids = (state.resume.jobs || []).filter(j => j.resume_state === 'ready' && j.status !== 'applied' && !(state.apply.jobs || []).find(x => x.id === j.id)).map(j => j.id);
+      b.disabled = true; b.textContent = 'Reading forms…';
+      const r = await postJ('/api/apply/plan', { job_ids: ids });
+      const sk = Object.keys(r.skipped || {}).length;
+      $('refresh-msg').textContent = `Planned ${r.planned.length}` + (Object.keys(r.failed).length ? `, failed ${Object.keys(r.failed).length}` : '') + (sk ? `, skipped ${sk} (${Object.values(r.skipped)[0]})` : '');
+    } else if (act === 'approve-all') {
+      const ids = (state.apply.jobs || []).filter(j => j.apply_state === 'planned').map(j => j.id);
+      const r = await postJ('/api/apply/approve', { job_ids: ids });
+      $('refresh-msg').textContent = `Approved ${r.approved.length}` + (Object.keys(r.refused).length ? `; ${Object.keys(r.refused).length} refused (unresolved fields)` : '');
+    } else if (act === 'apply-all') {
+      const ids = (state.apply.jobs || []).filter(j => j.apply_state === 'approved').map(j => j.id);
+      const r = await postJ('/api/apply/enqueue', { job_ids: ids });
+      $('refresh-msg').textContent = `Queued ${r.queued.length} plan(s) - run /apply-queue in a Claude session (or wait for the scheduled task)`;
+    } else if (act === 'enqueue') {
+      const r = await postJ('/api/apply/enqueue', { job_ids: [id] });
+      $('refresh-msg').textContent = r.queued.length ? 'Queued - run /apply-queue in a Claude session (or wait for the scheduled task)' : Object.values(r.refused)[0];
+    } else if (act === 'dequeue') {
+      await postJ(`/api/jobs/${id}/apply/dequeue`, {});
+    } else if (act === 'mark-submitted') {
+      const r = await postJ(`/api/jobs/${id}/apply/mark_submitted`, {});
+      if (!r.ok) $('refresh-msg').textContent = r.error;
+    } else if (act === 'replan') {
+      await postJ('/api/apply/plan', { job_ids: [id] });
+    } else if (act === 'draft') {
+      const r = await postJ(`/api/jobs/${id}/apply/draft_answers`, {});
+      $('refresh-msg').textContent = r.ok ? `Drafting ${r.queued} answer(s) - re-plan when the Q&A is ready` : r.error;
+    } else if (act === 'save' || act === 'approve') {
+      // only values you actually changed become fixes (so "From" stays honest)
+      const card = b.closest('.qcard'), fixes = {};
+      const orig = Object.fromEntries(((state.apply.jobs.find(j => j.id === id) || {}).plan?.fields || []).map(f => [f.key, f.value]));
+      const seenGroup = new Set();
+      card.querySelectorAll('[data-fk]').forEach(inp => {
+        let v;
+        if (inp.dataset.multi) {                 // checkbox group: one fix per key
+          if (seenGroup.has(inp.dataset.fk)) return; seenGroup.add(inp.dataset.fk);
+          v = [...card.querySelectorAll(`[data-fk="${inp.dataset.fk}"]:checked`)].map(x => x.value);
+        }
+        else if (inp.dataset.bool) v = inp.value === '' ? null : inp.value === 'true';
+        else v = inp.value === '' ? null : inp.value;
+        if (v === null || (Array.isArray(v) && !v.length)) return;
+        if (JSON.stringify(v) !== JSON.stringify(orig[inp.dataset.fk] ?? null)) fixes[inp.dataset.fk] = v;
+      });
+      const r = await postJ(`/api/jobs/${id}/apply/review`, { action: act === 'save' ? 'fix' : 'approve', fixes });
+      if (!r.ok) $('refresh-msg').textContent = r.error;
+    } else {
+      const r = await postJ(`/api/jobs/${id}/apply/review`, { action: act });
+      if (!r.ok) $('refresh-msg').textContent = r.error;
+    }
+    pollResume(true);
+  });
+}
+
+// answers typed but not yet submitted survive re-renders (keyed by skill)
+function captureDrafts() {
+  const d = { _plan: {} };
+  // open plan editors: every value keyed by job + field, restored after the re-render
+  document.querySelectorAll('.apply-panel .qcard').forEach(card => {
+    const idEl = card.querySelector('[data-apply][data-id]'); if (!idEl) return;
+    card.querySelectorAll('[data-fk]').forEach(inp => {
+      const key = `${idEl.dataset.id}|${inp.dataset.fk}` + (inp.dataset.multi ? `|${inp.value}` : '');
+      d._plan[key] = inp.dataset.multi ? inp.checked : inp.value;
+    });
+  });
+  document.querySelectorAll('.qrow[data-g]').forEach(el => {
+    const on = el.querySelector('.ans button.on');
+    d[el.dataset.skill] = { a: on ? on.dataset.a : '', ctx: el.querySelector('.ctx').value,
+                            glob: el.querySelector('.glob').checked };
+  });
+  return d;
+}
+function restoreDrafts(d) {
+  document.querySelectorAll('.apply-panel .qcard').forEach(card => {
+    const idEl = card.querySelector('[data-apply][data-id]'); if (!idEl) return;
+    card.querySelectorAll('[data-fk]').forEach(inp => {
+      const key = `${idEl.dataset.id}|${inp.dataset.fk}` + (inp.dataset.multi ? `|${inp.value}` : '');
+      if (!(key in (d._plan || {}))) return;
+      if (inp.dataset.multi) inp.checked = d._plan[key]; else inp.value = d._plan[key];
+    });
+  });
+  document.querySelectorAll('.qrow[data-g]').forEach(el => {
+    const s = d[el.dataset.skill]; if (!s) return;
+    if (s.a) el.querySelector(`.ans button[data-a="${s.a}"]`)?.classList.add('on');
+    el.querySelector('.ctx').value = s.ctx;
+    el.querySelector('.glob').checked = s.glob;
+  });
+}
+
+function renderResumes() {
+  const r = state.resume; if (!r) return;
+  const pf = state.pipeFilter;                 // pill filter from the Pipeline panel
+  const drafts = captureDrafts();
+  const list = $('list');
+  $('result-count').textContent = '';
+  const by = s => r.jobs.filter(j => j.resume_state === s);
+  const waiting = by('needs_answers'), running = r.jobs.filter(j => ['queued','analyzing','generating'].includes(j.resume_state));
+  // a resume whose job is applied / submitted is finished work: it leaves Ready for a collapsed Applied section
+  // finished work leaves Ready: applied / submitted, and applications you skipped
+  const isApplied = j => j.status === 'applied' || j.apply_state === 'submitted';
+  const isDone = j => isApplied(j) || j.apply_state === 'skipped';
+  const ready = by('ready').filter(j => !isDone(j)), done = by('ready').filter(isDone), failed = by('failed');
+  // group identical skills asked by several jobs, so one answer covers all of them
+  const groups = {};
+  waiting.forEach(j => j.questions.forEach(q => {
+    const k = q.skill.toLowerCase();
+    (groups[k] = groups[k] || { skill: q.skill, question: q.question, jobs: [] }).jobs.push(j);
+  }));
+  const gl = Object.values(groups);
+  const jobLine = (j, extra='') => `<div class="qcard row-card">${extra}<span class="t"><a href="${esc(j.url)}" target="_blank" rel="noopener">${esc(j.company)} &mdash; ${esc(j.title)} &#8599;</a></span>
+      <span class="stat">${j.resume_updated_at ? rel(j.resume_updated_at) : ''}</span>
+      <button class="small" data-jump="${j.id}" title="Filter the job list to this job (clear the search box to see everything again)">Show in list</button><span style="flex:1"></span>`;
+  let html = pipelinePanel(r, waiting.length, gl.length, ready.length, failed.length) + applyPanel(state.apply);
+  if (!r.jobs.length) html += `<div class="empty">No resumes yet. Filter the Inbox and click <b>&#9998; Tailor resumes</b>, or the &#9998; button on a job.</div>`;
+  if (gl.length && (!pf || pf === 'needs_answers')) {
+    html += `<div class="qsec"><h3>Needs answers &mdash; ${gl.length} question(s) across ${waiting.length} job(s)</h3>`;
+    // grouped by job (the requirement the skill found in that posting); a question several jobs
+    // share is shown under each of them and kept in sync, so one answer still covers all
+    waiting.forEach(j => {
+      html += jobLine(j, `<span class="pill q">${j.questions.length} open</span>`) +
+        `<button class="small" data-ract="skip" data-id="${j.id}">Skip questions &amp; generate</button>
+         <button class="small dh" data-ract="drop" data-id="${j.id}" title="Not the right role: mark not interested, drop its questions and leave the queue">&#10005; Not interested</button></div><div class="qcard qjob">`;
+      j.questions.forEach(q => {
+        const i = gl.findIndex(g => g.skill.toLowerCase() === q.skill.toLowerCase()), g = gl[i];
+        const others = g.jobs.filter(x => x.id !== j.id);
+        html += `<div class="qrow" data-g="${i}" data-skill="${esc(g.skill.toLowerCase())}">
+        <div class="skill"><span class="chip note" title="Requirement in the posting that this question is about">requirement</span> ${esc(g.skill)}</div>
+        <div class="qt">${esc(q.question)}</div>
+        ${others.length ? `<div class="applies">Also asked by ${others.map(x => esc(x.company)).join(', ')} &middot; one answer covers all</div>` : ''}
+        <div class="ans">
+          <button class="small a-have" data-a="have">&#10003; Have it</button>
+          <button class="small fam" data-a="familiar">~ Familiar only</button>
+          <button class="small dh" data-a="dont-have">&#10005; Don't have it</button>
+          <input type="text" class="ctx" placeholder="Context (one line, optional): where, how deep&#8230;">
+        </div>
+        <div class="scope"><label><input type="checkbox" class="glob"> Also remember for future jobs (saved to skills inventory)</label>
+          <span>&middot; otherwise this application only</span></div>
+      </div>`;
+      });
+      html += `<div class="qbar"><span class="stat">Answers here also count for the other jobs that asked the same question.</span>
+        <span style="flex:1"></span><button class="primary small" data-submit-job="${j.id}">Submit &amp; generate ${esc(j.company)}</button></div></div>`;
+    });
+    html += `<div class="qbar"><span class="stat">Unanswered questions stay open; use "Skip questions" on a job to generate without them.</span>
+        <span style="flex:1"></span><button class="primary" id="btn-submit-answers">Submit all answered &amp; generate</button></div></div>`;
+  }
+  if (running.length && (!pf || pf === 'running' || pf === 'queued')) {
+    html += `<div class="qsec"><h3>In progress</h3>`;
+    running.filter(j => !pf || (pf === 'queued') === (j.resume_state === 'queued')).forEach(j => html += jobLine(j, j.resume_state === 'queued' ? `<span class="pill wait">queued</span>` : `<span class="spin"></span><b>${j.resume_state}</b>`) + phaseChips(j.phases) + `</div>`);
+    html += `</div>`;
+  }
+  if (ready.length && (!pf || pf === 'ready')) {
+    html += `<div class="qsec"><h3>Ready &mdash; ${ready.length}</h3>`;
+    ready.forEach(j => html += jobLine(j, `<span class="pill ok">ready</span>`) + phaseChips(j.phases) +
+      (j.apply_state ? `<span class="pill ${APPLY_PILL[j.apply_state] || 'wait'}">apply: ${esc(j.apply_state.replace('_',' '))}</span>`
+        : j.apply_hint && !j.apply_hint.ok ? `<span class="chip note" title="cannot enter the apply phase">${esc(j.apply_hint.note)}</span>`
+        : `<span class="chip ${j.apply_hint?.unattended_ok ? 'skill' : ''}" title="What to expect from this board's application form">${esc(j.apply_hint?.ats || '')} &middot; ${esc(j.apply_hint?.note || '')}</span>
+           <button class="small primary" data-ract="plan" data-id="${j.id}" title="Build the application plan for review">Plan apply</button>`) +
+      `<button class="small ok" data-ract="open" data-id="${j.id}">Open resume</button>
+       <button class="small" data-ract="folder" data-id="${j.id}">Folder</button>
+       <button class="small" data-ract="notes" data-id="${j.id}">Notes</button>
+       <button class="small" data-ract="regen" data-id="${j.id}">Regenerate</button></div>
+       <div class="notes-box" id="notes-${j.id}" style="display:none"></div>`);
+    html += `</div>`;
+  }
+  if (done.length && (!pf || pf === 'ready')) {
+    const nApplied = done.filter(isApplied).length, nSkipped = done.length - nApplied;
+    html += `<div class="qsec"><h3 style="display:flex;gap:10px;align-items:center">Finished &mdash; ${nApplied} applied${nSkipped ? `, ${nSkipped} skipped` : ''}
+      <button class="small" id="btn-toggle-done">${state.showDone ? 'Hide' : 'Show'}</button></h3>`;
+    if (state.showDone) done.forEach(j => html += jobLine(j, isApplied(j) ? `<span class="pill ok">applied</span>` : `<span class="pill wait">skipped</span>`) +
+      `<span class="stat">${j.applied_at ? esc(String(j.applied_at).slice(0, 10)) : ''}</span>
+       ${isApplied(j) ? '' : `<button class="small" data-ract="restore" data-id="${j.id}" title="Bring the application plan back">Restore</button>`}
+       <button class="small" data-ract="open" data-id="${j.id}">Open resume</button>
+       <button class="small" data-ract="folder" data-id="${j.id}">Folder</button>
+       <button class="small" data-ract="notes" data-id="${j.id}">Notes</button></div>
+       <div class="notes-box" id="notes-${j.id}" style="display:none"></div>`);
+    html += `</div>`;
+  }
+  if (failed.length && (!pf || pf === 'failed')) {
+    html += `<div class="qsec"><h3>Failed &mdash; ${failed.length}</h3>`;
+    failed.forEach(j => html += jobLine(j, `<span class="pill fail">failed</span><span class="stat" title="${esc(j.resume_error)}">${esc((j.resume_error||'').slice(0,120))}</span>`) +
+      `<button class="small" data-ract="retry" data-id="${j.id}">Retry</button></div>`);
+    html += `</div>`;
+  }
+  list.innerHTML = html;
+  restoreDrafts(drafts);
+  // the same question under several jobs is one answer: mirror any change to its twins
+  const syncRow = el => {
+    const on = el.querySelector('.ans button.on'), ctx = el.querySelector('.ctx').value, glob = el.querySelector('.glob').checked;
+    list.querySelectorAll(`.qrow[data-g="${el.dataset.g}"]`).forEach(o => {
+      if (o === el) return;
+      o.querySelectorAll('.ans button').forEach(x => x.classList.toggle('on', !!on && x.dataset.a === on.dataset.a));
+      o.querySelector('.ctx').value = ctx; o.querySelector('.glob').checked = glob;
+    });
+  };
+  list.querySelectorAll('.qrow .ans button').forEach(b => b.onclick = () => {
+    b.parentElement.querySelectorAll('button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on'); syncRow(b.closest('.qrow'));
+  });
+  list.querySelectorAll('.qrow .ctx').forEach(i => i.oninput = () => syncRow(i.closest('.qrow')));
+  list.querySelectorAll('.qrow .glob').forEach(i => i.onchange = () => syncRow(i.closest('.qrow')));
+  list.querySelectorAll('[data-ract]').forEach(b => b.onclick = () => resumeAction(+b.dataset.id, b.dataset.ract));
+  list.querySelectorAll('[data-jump]').forEach(b => b.onclick = () => {
+    // tab counts are filter-aware, so they shrink while the title is in the search box
+    const j = r.jobs.find(x => x.id === +b.dataset.jump);
+    $('f-company').value = ''; $('f-q').value = j.title.slice(0, 40); state.tab = 'all';
+    $('refresh-msg').textContent = 'List filtered to one job - clear the search box to see everything';
+    renderTabs(); loadJobs();
+  });
+  bindPipeline(r); bindApply();
+  const td = $('btn-toggle-done'); if (td) td.onclick = () => { state.showDone = !state.showDone; renderResumes(); };
+  // answers are keyed by question group, so a per-job submit also covers the twins under other jobs
+  const submitAnswers = async (root, btn) => {
+    const answers = [], seen = new Set();
+    root.querySelectorAll('.qrow[data-g]').forEach(el => {
+      if (seen.has(el.dataset.g)) return; seen.add(el.dataset.g);
+      const on = el.querySelector('.ans button.on'); if (!on) return;
+      const g = gl[+el.dataset.g];
+      g.jobs.forEach(j => answers.push({ job_id: j.id, skill: g.skill, question: g.question,
+        answer: on.dataset.a, context: el.querySelector('.ctx').value,
+        scope: el.querySelector('.glob').checked ? 'global' : 'job' }));
+    });
+    if (!answers.length) { $('refresh-msg').textContent = 'Pick an answer first.'; return; }
+    btn.disabled = true;
+    const res = await (await fetch('/api/resume/answer', { method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ answers }) })).json();
+    $('refresh-msg').textContent = `Saved ${answers.length} answer(s); ${res.requeued.length} job(s) generating`;
+    pollResume(true);
+  };
+  const submit = $('btn-submit-answers');
+  if (submit) submit.onclick = () => submitAnswers(list, submit);
+  list.querySelectorAll('[data-submit-job]').forEach(b => b.onclick = () => submitAnswers(b.closest('.qcard.qjob'), b));
+}
+
+function jobCard(j) {
+  const flagChips = j.flags.map(f => {
+    const cls = (f.key === 'citizenship' || f.key === 'itar') ? 'warn'
+              : (f.key === 'no_sponsorship' || f.key === 'contract') ? 'note' : '';
+    return `<span class="chip ${cls}" title="${esc((f.terms||[]).join(', '))}">${esc(f.label)} ${f.points ? `(${f.points})` : ''}</span>`;
+  }).join('');
+  const skillGroups = (j.breakdown.skills?.groups || [])
+    .map(g => `<span class="chip skill" title="${esc(g.terms.join(', '))}">${esc(g.group)} +${g.points}</span>`).join('');
+  const locLabel = { austin:'Austin', remote_us:'Remote·US', remote_global:'Remote',
+                     texas:'TX', us_other:'US', unknown:'?', non_us:'non-US' }[j.loc_class] || j.loc_class;
+  const modeChip = j.work_mode && j.work_mode !== 'unknown'
+    ? `<span class="mode ${esc(j.work_mode)}">${esc(j.work_mode)}</span>` : '';
+  const hasFit = j.fit !== null && j.fit !== undefined;
+  const scorebox = hasFit
+    ? `<div class="scorebox ${scoreClass(j.fit, j.flags)}" title="Model fit (keyword score ${Math.round(j.score)})">${j.fit}<small>fit${j.fit_stale ? ' *' : ''}</small><em>kw ${Math.round(j.score)}</em></div>`
+    : `<div class="scorebox ${scoreClass(j.score, j.flags)}" title="Keyword score${j.fit_state ? ' - fit ' + j.fit_state : ''}">${Math.round(j.score)}<small>${j.fit_state === 'queued' || j.fit_state === 'scoring' ? 'fit…' : 'kw'}</small></div>`;
+  return `<div class="card ${j.status==='applied'?'applied':''}" data-id="${j.id}">
+    <div class="card-top">
+      ${scorebox}
+      <div class="job-main">
+        <div class="job-title"><span class="company">${esc(j.company)}</span>
+          <a href="${esc(j.url)}" target="_blank" rel="noopener">${esc(j.title)} &#8599;</a></div>
+        <div class="meta">
+          <span title="${esc(j.location)}">&#128205; ${esc(j.location || locLabel).slice(0,70)}</span>
+          ${modeChip}
+          ${j.department ? `<span>${esc(j.department).slice(0,40)}</span>` : ''}
+          ${j.posted_at ? `<span title="First published by the employer">posted ${esc(j.posted_at)}</span>` : ''}
+          ${j.updated_at && j.updated_at !== j.posted_at ? `<span title="Last edited by the employer (Greenhouse/Ashby boards report this)">updated ${esc(j.updated_at)}</span>` : ''}
+          ${j.salary_text ? `<span>&#128176; ${esc(j.salary_text)}</span>` : ''}
+          ${j.employment_type ? `<span>${esc(j.employment_type)}</span>` : ''}
+          ${j.dup_count ? `<span>+${j.dup_count} duplicate source(s)</span>` : ''}
+          ${j.viewed_at ? `<span title="${esc(j.viewed_at)}">&#128065; viewed ${rel(j.viewed_at)}</span>` : ''}
+          ${j.status === 'applied' && j.applied_at ? `<span class="auth-ok" title="${esc(j.applied_at)}">applied ${rel(j.applied_at)}</span>` : ''}
+        </div>
+        <div class="chips">${flagChips}${skillGroups}</div>
+        ${fitStrip(j)}
+        ${resumeStrip(j)}
+        <div class="detail" id="detail-${j.id}"></div>
+      </div>
+      ${infoCols(j)}
+      <div class="actions">
+        <label class="sel-box" title="Select for bulk tailoring"><input type="checkbox" data-sel="${j.id}" ${state.selected.has(j.id) ? 'checked' : ''}></label>
+        <button class="tailor-b" data-ract="tailor" title="Tailor a resume for this job">&#9998;</button>
+        <button class="star ${j.status==='starred'?'on':''}" data-act="star" title="Star">&#9733;</button>
+        <button class="save-b ${j.status==='saved'?'on':''}" data-act="save"
+                title="${j.status==='saved'?'Unsave (back to inbox)':'Save for later'}">&#128278;</button>
+        <button class="applied-b ${j.status==='applied'?'on':''}" data-act="applied"
+                title="${j.status==='applied'?'Unmark applied (back to inbox)':'Mark applied'}">&#10003;</button>
+        <button class="ni-b ${j.status==='not_interested'?'on':''}" data-act="notint"
+                title="${j.status==='not_interested'?'Back to inbox':'Not interested'}">&#128078;</button>
+        <button class="hide-b ${j.status==='hidden'?'on':''}" data-act="hidden"
+                title="${j.status==='hidden'?'Unhide (back to inbox)':'Hide'}">&#10005;</button>
+        <button data-act="detail" title="Details">&#8964;</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderJobs() {
+  const list = $('list');
+  $('result-count').textContent = state.truncated ? `showing the top ${state.jobs.length} of ${state.total} jobs - narrow the filters to see the rest` : `${state.jobs.length} jobs`;
+  if (!state.jobs.length) {
+    updateSelection();
+    const filtered = $('f-q').value || $('f-min').value > 0 || $('f-days').value || $('f-new').checked ||
+      mval('f-loc') || mval('f-mode') || mval('f-role') || $('f-company').value ||
+      mval('f-source') || $('f-auth').value;
+    list.innerHTML = `<div class="empty">` + (filtered
+      ? 'No jobs match these filters — try loosening one.'
+      : 'Nothing here. Hit <b>Refresh</b> to fetch jobs.') + `</div>`;
+    return;
+  }
+  captureExtraDrafts();
+  const page = state.jobs.slice(0, state.shown);
+  const rest = state.jobs.length - page.length;
+  list.innerHTML = page.map(jobCard).join('') + (rest > 0
+    ? `<div class="empty"><button class="primary" id="btn-more">Show ${Math.min(PAGE, rest)} more (${rest} left)</button></div>` : '');
+  updateSelection();
+  Object.keys(state.openExtra).forEach(id => $(`detail-${id}`) && renderExtra(+id));
+}
+
+// One delegated handler for every card (binding 1,500 cards individually was most of the render cost).
+$('list').addEventListener('change', e => {
+  const cb = e.target.closest('input[data-sel]');
+  if (!cb) return;
+  cb.checked ? state.selected.add(+cb.dataset.sel) : state.selected.delete(+cb.dataset.sel);
+  updateSelection();
+});
+$('list').addEventListener('click', e => {
+  if (e.target.closest('#btn-more')) { state.shown += PAGE; renderJobs(); return; }
+  const card = e.target.closest('.card');
+  if (!card) return;
+  const id = +card.dataset.id;
+  if (e.target.closest('.job-title a')) { markViewed(id); return; }
+  const rbtn = e.target.closest('button[data-ract]');
+  if (rbtn) { resumeAction(id, rbtn.dataset.ract); return; }
+  const fbtn = e.target.closest('button[data-fact]');
+  if (fbtn) { fitFeedback(id, fbtn.dataset.fact, fbtn); return; }
+  const btn = e.target.closest('button[data-act]');
+  if (btn) statusClick(id, btn.dataset.act, card);
+});
+
+// ---- model fit: feedback + scoring queue ----
+async function fitFeedback(id, verdict, btn) {
+  let note = '';
+  if (verdict !== 'right') {
+    note = prompt(verdict === 'too_high'
+      ? 'Why is this fit too high? (e.g. "needs single-engine DB internals; I know concepts, not internals")'
+      : 'Why is this fit too low? (what the model missed)') ;
+    if (note === null) return;
+  }
+  const r = await (await fetch(`/api/jobs/${id}/fit/feedback`, { method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ verdict, note }) })).json();
+  if (!r.ok) { $('refresh-msg').textContent = r.error || 'Feedback failed'; return; }
+  btn.closest('.fit-fb').innerHTML = `<span class="stat">noted (${r.pending} pending${r.profile_update ? ' - updating profile' : ''})</span>`;
+  $('refresh-msg').textContent = r.profile_update
+    ? 'Enough feedback - the fit profile is being rewritten; affected jobs re-score afterwards'
+    : `Feedback saved (${r.pending} pending; the profile updates after ${state.fitAuto || 5})`;
+  if (r.profile_update) pollFit(true);
+}
+
+$('btn-fit').onclick = async () => {
+  const ids = [...state.selected];
+  const body = ids.length ? { job_ids: ids } : {};
+  if (!ids.length && !confirm('Fit-score every gated job without a score (keyword score at or above the gate in Settings)? Runs in the background.')) return;
+  const r = await (await fetch('/api/fit/start', { method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) })).json();
+  $('refresh-msg').textContent = r.ok ? (r.queued.length ? `Queued ${r.queued.length} job(s) for fit scoring` : 'Nothing to score: ticked jobs are already scored or below the gate') : r.error;
+  if (r.ok && r.queued.length) { state.selected.clear(); pollFit(true); loadJobs({ keep: true }); }
+};
+
+// Polls /api/fit/status while work is queued; reloads the list as batches land.
+async function pollFit(force) {
+  if (state.fitPolling && !force) return;
+  const s = await (await fetch('/api/fit/status')).json();
+  state.fitAuto = s.auto_profile_after;
+  const active = s.queued + s.running > 0;
+  if (active) {
+    $('refresh-msg').textContent = `Fit scoring: ${s.queued + s.running} left · ~${Math.ceil(s.eta_seconds / 60)} min · ${s.message || ''}`;
+    if (s.done !== state.fitDone) { state.fitDone = s.done; if (state.tab !== 'resumes') loadJobs({ keep: true }); }
+    if (!state.fitPolling) state.fitPolling = setInterval(() => pollFit(true), 5000);
+  } else if (state.fitPolling) {
+    clearInterval(state.fitPolling); state.fitPolling = null;
+    $('refresh-msg').textContent = `Fit scoring done: ${s.done} scored` + (s.failed ? `, ${s.failed} failed` : '');
+    if (state.tab !== 'resumes') loadJobs({ keep: true });
+  }
+}
+
+async function statusClick(id, act, card) {
+  if (act === 'detail') return toggleDetail(id);
+  const job = state.jobs.find(j => j.id === id);
+  // every action is a toggle: clicking again returns the job to the inbox
+  const target = ({star:'starred', save:'saved', applied:'applied',
+                   notint:'not_interested', hidden:'hidden'})[act];
+  const status = job.status === target ? 'new' : target;
+  // optimistic: redraw just this card, then sync with the server and reload the list in place
+  job.status = status;
+  if (status === 'applied') {
+    job.applied_at = new Date().toISOString();
+    if (!job.viewed_at) job.viewed_at = job.applied_at;   // applying implies viewed
+  }
+  const open = card.querySelector('.detail.open');
+  card.outerHTML = jobCard(job);
+  if (open) { const d = $(`detail-${id}`); d.innerHTML = open.innerHTML; d.dataset.loaded = '1'; d.classList.add('open'); }
+  await fetch(`/api/jobs/${id}/status`, { method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify({status}) });
+  loadJobs({ keep: true }); loadStatus();
+}
+
+async function toggleDetail(id) {
+  const el = $(`detail-${id}`);
+  if (el.classList.contains('open')) { el.classList.remove('open'); return; }
+  markViewed(id);
+  if (!el.dataset.loaded) {
+    const j = await (await fetch(`/api/jobs/${id}`)).json();
+    const b = j.breakdown;
+    const parts = [];
+    if (b.title) parts.push(`Title match <b>${esc(b.title.label)}</b> +${b.title.points}`);
+    if (b.seniority) parts.push(`Seniority +${b.seniority}`);
+    if (b.skills) parts.push(`Skills +${b.skills.points}`);
+    if (b.location) parts.push(`Location (${esc(b.location.class)}) ${b.location.points>=0?'+':''}${b.location.points}`);
+    if (b.experience) parts.push(`Experience fit +${b.experience}`);
+    if (b.freshness) parts.push(`Freshness (${b.freshness.days_old}d old) +${b.freshness.points}`);
+    if (b.source?.points) parts.push(`Direct board +${b.source.points}`);
+    (b.title_penalties||[]).forEach(p => parts.push(`Title penalty ${p.points}`));
+    (j.flags||[]).forEach(f => { if (f.points) parts.push(`${esc(f.label)} ${f.points}`); });
+    el.innerHTML = `<div class="breakdown">${parts.join(' &nbsp;·&nbsp; ') || 'No score details'}</div>
+                    <div class="desc">${esc(j.description || 'No description captured.')}</div>`;
+    el.dataset.loaded = '1';
+  }
+  el.classList.add('open');
+}
+
+async function loadJobs(opts = {}) {
+  if (state.tab === 'resumes') {         // the Resumes tab renders from /api/resume/status
+    if (state.resume) renderResumes(); else pollResume(true);
+    return;
+  }
+  if (!opts.keep) state.shown = PAGE;    // a new query starts at the first page; a status sync keeps it
+  const p = new URLSearchParams({
+    tab: state.tab, q: $('f-q').value, min_score: $('f-min').value,
+    loc: mval('f-loc'), mode: mval('f-mode'), days: $('f-days').value, days_by: $('f-days-by').value,
+    role: mval('f-role'), company: $('f-company').value, auth: $('f-auth').value,
+    source: mval('f-source'), sort: $('f-sort').value, new: $('f-new').checked ? '1' : '',
+  });
+  const data = await (await fetch('/api/jobs?' + p)).json();
+  state.jobs = data.jobs; state.total = data.total; state.truncated = !!data.truncated;
+  if (data.tab_counts) { state.tabCounts = data.tab_counts; renderTabs(); }
+  renderJobs();
+}
+
+async function loadFacets() {
+  const f = await (await fetch('/api/facets')).json();
+  $('companies-dl').innerHTML = f.companies.map(c => `<option value="${esc(c)}">`).join('');
+  makeMsel('f-role', 'Roles', f.roles.map(r => ({v: r, t: esc(r)})));
+  makeMsel('f-source', 'Sources',
+    [{v: 'direct', t: 'Direct boards (all)'}, {v: 'aggregator', t: 'Aggregators (all)'}]
+      .concat((f.sources || []).map(s => ({v: s, t: esc(s)}))));
+}
+
+async function loadStatus() {
+  const s = await (await fetch('/api/status')).json();
+  state.counts = s.counts;
+  renderTabs();
+  const last = s.last_refresh?._summary;
+  $('stat-line').textContent = `${s.counts.total} jobs tracked` +
+    (last ? ` · last refresh ${last.at.replace('T',' ').replace('Z',' UTC')} (${last.new} new)` : ' · never refreshed');
+  renderProgress(s.refresh, s.auto_refresh);
+  if (s.refresh.running && !state.polling) {
+    state.polling = setInterval(async () => {
+      const st = await (await fetch('/api/status')).json();
+      renderProgress(st.refresh, st.auto_refresh);
+      if (!st.refresh.running) {
+        clearInterval(state.polling); state.polling = null;
+        await loadStatus(); loadJobs(); loadFacets();
+        $('refresh-msg').textContent = st.refresh.message;      // "Done: N fetched, M new."
+        setTimeout(() => pollFit(true), 2000);                  // new jobs enter the fit queue
+      }
+    }, 1500);
+  }
+}
+
+// Refresh progress strip: phase (boards → aggregators → saving → scoring), N/M counter,
+// elapsed time and the last board reported. Idle: the final message + the auto-refresh ETA.
+const PHASES = { boards: 'Company boards', aggregators: 'Aggregators', saving: 'Saving', scoring: 'Scoring' };
+function renderProgress(r, auto) {
+  const strip = $('refresh-prog'), bar = $('rp-bar');
+  $('btn-refresh').disabled = r.running;
+  $('btn-refresh').innerHTML = r.running ? 'Refreshing&#8230;' : '&#8635; Refresh';
+  if (!r.running) {
+    strip.classList.remove('on');
+    if (auto?.next) {
+      const n = new Date(auto.next), sameDay = n.toDateString() === new Date().toDateString();
+      const when = n.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) + (sameDay ? '' : ' tomorrow');
+      $('refresh-msg').textContent = (auto.at?.length ? `auto-refresh at ${auto.at.join(', ')}` : `auto-refresh every ${auto.every_hours}h`) + ` · next ${when}`;
+    } else $('refresh-msg').textContent = '';
+    $('refresh-msg').title = r.message || '';
+    return;
+  }
+  strip.classList.add('on');
+  $('refresh-msg').textContent = '';
+  const secs = r.started ? Math.max(0, Math.round((Date.now() - Date.parse(r.started)) / 1000)) : 0;
+  const elapsed = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+  $('rp-phase').textContent = (PHASES[r.phase] || 'Starting') + (r.trigger === 'auto' ? ' (scheduled)' : '') + ' · ' + elapsed;
+  const counted = r.total > 0 && (r.phase === 'boards' || r.phase === 'aggregators');
+  bar.classList.toggle('indet', !counted);
+  bar.firstElementChild.style.width = counted ? `${Math.round(100 * r.done / r.total)}%` : '';
+  $('rp-count').textContent = counted ? `${r.done}/${r.total}` + (r.failed ? ` · ${r.failed} failed` : '') : '';
+  $('rp-last').textContent = r.message || '';
+}
+
+$('btn-refresh').onclick = async () => {
+  await fetch('/api/refresh', { method: 'POST' });
+  $('btn-refresh').disabled = true;
+  loadStatus();
+};
+$('btn-rescore').onclick = async () => {
+  $('btn-rescore').disabled = true;
+  const r = await (await fetch('/api/rescore', { method: 'POST' })).json();
+  $('btn-rescore').disabled = false;
+  $('refresh-msg').textContent = r.ok ? `Rescored ${r.rescored} jobs` : `Rescore failed: ${r.error}`;
+  loadJobs();
+};
+$('btn-report').onclick = async () => {
+  const el = $('report');
+  if (el.style.display === 'block') { el.style.display = 'none'; return; }
+  const s = await (await fetch('/api/status')).json();
+  const lr = s.last_refresh;
+  if (!lr) { el.textContent = 'No refresh yet.'; el.style.display = 'block'; return; }
+  let txt = 'Last refresh by source:\n';
+  for (const [k, v] of Object.entries(lr)) {
+    if (['_summary','board_failures','companies'].includes(k)) continue;
+    txt += `  ${k}: ` + (v.error ? `ERROR - ${v.error}` : `${v.kept} kept`) + '\n';
+  }
+  if (lr.board_failures?.length) {
+    txt += `\n${lr.board_failures.length} company board(s) failed (fix slug in config/companies.yaml):\n`;
+    lr.board_failures.forEach(f => txt += `  - ${f}\n`);
+  }
+  el.textContent = txt; el.style.display = 'block';
+};
+
+let qTimer;
+$('f-q').oninput = () => { clearTimeout(qTimer); qTimer = setTimeout(loadJobs, 300); };
+let cTimer;
+$('f-company').oninput = () => { clearTimeout(cTimer); cTimer = setTimeout(loadJobs, 300); };
+$('f-min').oninput = () => { $('f-min-val').textContent = $('f-min').value; };
+$('f-min').onchange = loadJobs;
+['f-days','f-days-by','f-auth','f-sort','f-new'].forEach(id => $(id).onchange = loadJobs);
+$('f-preset-sre').onclick = () => {
+  // the honest LinkedIn-equivalent view: one click instead of four filters
+  setMsel('f-loc', ['austin', 'texas', 'remote_us']);
+  const fam = ['SRE'];    // the SRE label now covers site/systems/service/platform reliability + production engineer titles
+  const have = new Set((MSEL_OPTS['f-role']?.options || []).map(o => o.v));
+  setMsel('f-role', fam.filter(r => have.has(r)));
+  setMsel('f-source', ['direct']);
+  $('f-days').value = '30'; $('f-q').value = ''; $('f-company').value = '';
+  loadJobs();
+};
+if (new URLSearchParams(location.search).get('new') === '1') $('f-new').checked = true;   // Discord digest link
+
+if (location.hash === '#resumes') state.tab = 'resumes';
+loadStatus(); loadJobs(); loadFacets(); pollResume(); pollFit(true);
+fetch('/api/settings').then(r => r.json()).then(s => { state.resume = state.resume || {}; state.resume.batch_max = s.resume?.batch_max; });
+</script>
+</body>
+</html>
