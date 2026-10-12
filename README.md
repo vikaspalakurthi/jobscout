@@ -127,6 +127,12 @@ Work-authorization answers and the citizenship/clearance exclusion come from you
 `resume/`, so they work for anyone once those files exist.
 
 ## Documentation
+**Docs site: <https://vikaspalakurthi.github.io/jobscout/>** — installation, quickstart,
+terminology (ATS, categories, scores), architecture diagrams, page-by-page guide,
+configuration and API reference, upgrading, troubleshooting, privacy. Built from `docs/`
+with MkDocs (`pip install -r requirements-docs.txt && mkdocs serve`).
+
+Maintainer notes, also on the site under *Internals*:
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — data flow, schema, scoring, every endpoint,
   the three categories of employer (documented APIs / undocumented JSON / never)
 - [`docs/LEARNINGS.md`](docs/LEARNINGS.md) — the gotchas: board quirks, classifier traps, filler

@@ -142,6 +142,12 @@ python perf.py [port]            # time every UI endpoint on localhost + 127.0.0
   (issue/PR templates, CODEOWNERS, Dependabot, stale + greeting bots, Claude review bot).
 - `docs/LEARNINGS.md` and `docs/STATUS.md` are public: record board quirks and run outcomes,
   not application details that identify the user's situation beyond what `README.md` says.
+- **Docs site** (`mkdocs.yml`, MkDocs Material, deployed by `.github/workflows/docs.yml` to
+  GitHub Pages): user-facing pages live under `docs/getting-started|concepts|guide|reference|
+  operations` + `docs/contributing.md`; ARCHITECTURE/LEARNINGS/STATUS appear as *Internals*.
+  A behaviour change updates the matching user page too (configuration.md for settings keys,
+  api.md for endpoints, upgrading.md's breaking-changes table for anything a user must act
+  on). `python -m mkdocs build --strict` must pass; Mermaid diagrams render natively.
 
 ## Branching strategy
 

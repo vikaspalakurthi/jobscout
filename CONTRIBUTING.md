@@ -25,6 +25,15 @@ it that way are very welcome.
   stay that way. Templates go in `templates/`.
 - User statuses (`status`, `viewed_at`, `applied_at`, `notes`) survive every refresh.
 
+## The flow at a glance
+
+```
+issue/idea → fork + branch → change + tests → docs in the same PR → pull request
+          → CI (pyflakes + tests, Linux & Windows) + review bot → maintainer review → squash-merge
+```
+
+The long version with a diagram: https://vikaspalakurthi.github.io/jobscout/contributing/
+
 ## Workflow
 1. Fork, branch from `main` (`feat/<slug>` or `fix/<slug>`).
 2. `pip install -r requirements.txt`, then `python -m unittest discover -s tests` — keep it green.
