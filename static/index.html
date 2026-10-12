@@ -144,7 +144,7 @@ document.addEventListener('click', () =>
 const mval = id => [...(MSELS[id] || [])].join(',');
 
 makeMsel('f-loc', 'Locations', [
-  {v: 'austin', t: 'Austin'}, {v: 'texas', t: 'Texas (DFW / Houston / SA)'},
+  {v: 'home', t: 'Home metro'}, {v: 'home_state', t: 'Home state (other metros)'},
   {v: 'remote_us', t: 'Remote (US)'}, {v: 'unknown', t: 'Unknown'},
 ]);
 makeMsel('f-mode', 'Mode', [
@@ -224,8 +224,8 @@ function infoCols(j) {
     'citizen_only': ['Citizen only', 'auth-bad', 'Citizenship or clearance required'],
   }[j.work_auth || ''] || ['—', '', ''];
   const kind = DIRECT_SET.has(j.source) ? 'direct board' : 'aggregator';
-  const locLabel = { austin: 'Austin', remote_us: 'Remote · US', remote_global: 'Remote',
-                     texas: 'Texas', us_other: 'Other US', unknown: '—',
+  const locLabel = { home: state.home?.city || 'Home', remote_us: 'Remote · US', remote_global: 'Remote',
+                     home_state: state.home?.state || 'Home state', us_other: 'Other US', unknown: '—',
                      non_us: 'Non-US' }[j.loc_class] || (j.loc_class || '—');
   return `<div class="info-cols">
     <div class="info wide"><small>Company</small>
@@ -898,8 +898,8 @@ function jobCard(j) {
   }).join('');
   const skillGroups = (j.breakdown.skills?.groups || [])
     .map(g => `<span class="chip skill" title="${esc(g.terms.join(', '))}">${esc(g.group)} +${g.points}</span>`).join('');
-  const locLabel = { austin:'Austin', remote_us:'Remote·US', remote_global:'Remote',
-                     texas:'TX', us_other:'US', unknown:'?', non_us:'non-US' }[j.loc_class] || j.loc_class;
+  const locLabel = { home: state.home?.city || 'Home', remote_us:'Remote·US', remote_global:'Remote',
+                     home_state: state.home?.state_code || 'State', us_other:'US', unknown:'?', non_us:'non-US' }[j.loc_class] || j.loc_class;
   const modeChip = j.work_mode && j.work_mode !== 'unknown'
     ? `<span class="mode ${esc(j.work_mode)}">${esc(j.work_mode)}</span>` : '';
   const hasFit = j.fit !== null && j.fit !== undefined;
@@ -1111,7 +1111,8 @@ async function loadFacets() {
 
 async function loadStatus() {
   const s = await (await fetch('/api/status')).json();
-  state.counts = s.counts;
+  state.counts = s.counts; state.home = s.home; state.view = s.view;
+  if (s.view?.label) $('f-preset-sre').textContent = s.view.label;
   renderTabs();
   const last = s.last_refresh?._summary;
   $('stat-line').textContent = `${s.counts.total} jobs tracked` +
@@ -1198,13 +1199,13 @@ $('f-min').oninput = () => { $('f-min-val').textContent = $('f-min').value; };
 $('f-min').onchange = loadJobs;
 ['f-days','f-days-by','f-auth','f-sort','f-new'].forEach(id => $(id).onchange = loadJobs);
 $('f-preset-sre').onclick = () => {
-  // the honest LinkedIn-equivalent view: one click instead of four filters
-  setMsel('f-loc', ['austin', 'texas', 'remote_us']);
-  const fam = ['SRE'];    // the SRE label now covers site/systems/service/platform reliability + production engineer titles
+  // the honest LinkedIn-equivalent view: one click instead of four filters (roles from the active preset's `view`)
+  setMsel('f-loc', ['home', 'home_state', 'remote_us']);
+  const fam = state.view?.roles || [];
   const have = new Set((MSEL_OPTS['f-role']?.options || []).map(o => o.v));
   setMsel('f-role', fam.filter(r => have.has(r)));
   setMsel('f-source', ['direct']);
-  $('f-days').value = '30'; $('f-q').value = ''; $('f-company').value = '';
+  $('f-days').value = String(state.view?.days || 30); $('f-q').value = ''; $('f-company').value = '';
   loadJobs();
 };
 if (new URLSearchParams(location.search).get('new') === '1') $('f-new').checked = true;   // Discord digest link

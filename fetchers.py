@@ -40,8 +40,10 @@ DIRECT_SOURCES = ("greenhouse", "lever", "ashby", "smartrecruiters", "workday",
                   "amazon", "oracle", "recruitee", "workable", "bamboohr", "breezy",
                   "oraclehcm", "phenom", "icims")
 
-# Cheap prefilter so ~90 company boards don't flood the DB with unrelated roles.
-TITLE_RELEVANT = re.compile(
+# Fetch-time prefilter. The patterns live in config/skills.yaml -> relevance (loaded from a
+# role preset, see config/presets/); the built-ins below are the fallback when that section is
+# missing. Compiled once per skills.yaml modification.
+_FALLBACK_TITLE = (
     r"site reliab|\bsre\b|dev.?ops|observab|platform|infrastructur|\binfra\b|kafka|elastic|"
     r"opensearch|\belk\b|splunk|\bsiem\b|reliab|production engineer|cloud engineer|"
     r"cloud operations|cloud infrastructure|cloud ?ops|tech ?ops|\bops engineer|"
@@ -50,28 +52,53 @@ TITLE_RELEVANT = re.compile(
     r"kubernetes|\bk8s\b|admin(istrator)?\b|sysadmin|middleware|\bdba\b|"
     r"release engineer|build engineer|automation engineer|ci/?cd|prometheus|grafana|"
     r"(aws|azure|gcp) (engineer|architect)|resilience|capacity (engineer|planning)|"
-    r"chaos engineer|performance engineer",
-    re.I,
-)
-
-# Rescue rule: a title that fails the prefilter is still kept when its DESCRIPTION shows
-# strong ops evidence — at least 3 distinct signal groups below. Catches e.g.
-# "Software Engineer, Core Services" roles that are really Kafka/K8s operations work.
-DESC_RESCUE_GROUPS = [re.compile(p, re.I) for p in [
-    r"kafka|confluent|redpanda",
-    r"elasticsearch|opensearch|\belk\b|logstash|kibana|splunk",
+    r"chaos engineer|performance engineer")
+_FALLBACK_RESCUE = [
+    r"kafka|confluent|redpanda", r"elasticsearch|opensearch|\belk\b|logstash|kibana|splunk",
     r"prometheus|grafana|opentelemetry|datadog|new relic|observability|\bslo\b|error budget",
-    r"kubernetes|\bk8s\b|helm\b",
-    r"terraform|ansible|puppet|gitops|argocd",
+    r"kubernetes|\bk8s\b|helm\b", r"terraform|ansible|puppet|gitops|argocd",
     r"site reliability|\bsre\b|devops|on.?call|incident response|production support",
-    r"ci/cd|jenkins|github actions",
-    r"linux|unix",
-]]
+    r"ci/cd|jenkins|github actions", r"linux|unix"]
+_FALLBACK_SEARCH = ["site reliability engineer", "devops", "observability", "platform engineer",
+                    "kafka", "elasticsearch", "linux administrator", "systems administrator", "kubernetes"]
+_rel_cache = {"key": None}
+
+
+def _relevance():
+    """(TITLE_RELEVANT regex, [rescue regexes], min_groups, [search terms]) for the active profile."""
+    import scoring
+    rel = scoring.relevance()
+    key = id(scoring.load_config())
+    if _rel_cache["key"] != key:
+        terms = rel.get("title_terms") or [_FALLBACK_TITLE]
+        rescue = rel.get("desc_rescue_groups") or _FALLBACK_RESCUE
+        _rel_cache.update(
+            key=key,
+            title=re.compile("|".join(f"(?:{t})" for t in terms), re.I),
+            rescue=[re.compile(p, re.I) for p in rescue],
+            min_groups=int(rel.get("min_groups") or 3),
+            search=list(rel.get("search_terms") or _FALLBACK_SEARCH))
+    return _rel_cache
+
+
+class _TitleRelevant:
+    """Module-level handle that always reflects the current profile (fetchers use .search())."""
+    def search(self, text):
+        return _relevance()["title"].search(text or "")
+
+
+TITLE_RELEVANT = _TitleRelevant()
 
 
 def desc_relevant(description):
     d = (description or "")[:12000].lower()
-    return sum(1 for p in DESC_RESCUE_GROUPS if p.search(d)) >= 3
+    r = _relevance()
+    return sum(1 for p in r["rescue"] if p.search(d)) >= r["min_groups"]
+
+
+def search_terms():
+    """Keyword queries for boards that only answer searches (Workday, iCIMS, Phenom, Oracle HCM, amazon.jobs)."""
+    return _relevance()["search"]
 
 
 def is_relevant(title, description):
@@ -127,11 +154,28 @@ US_CITY = re.compile(
     r"mclean|santa clara|irvine|columbus|detroit|tampa|orlando|kansas city|st\.? louis",
     re.I,
 )
-TX_CITY = re.compile(
-    r"dallas|houston|san antonio|fort worth|\bplano\b|irving|frisco|richardson|mckinney|"
-    r"round rock|cedar park|pflugerville|san marcos|sugar land|the woodlands|lewisville|\bkaty\b",
-    re.I,
-)
+_home_cache = {"key": None}
+
+
+def home():
+    """Settings -> home: the user's metro (class "home") and the rest of their state (class
+    "home_state"). Compiled once per settings change."""
+    h = load_settings().get("home") or {}
+    key = repr(sorted(h.items()))
+    if _home_cache["key"] != key:
+        city_terms = [str(t).lower() for t in (h.get("city_terms") or [h.get("city") or "austin"])]
+        state_terms = [str(t).lower() for t in (h.get("state_terms") or [])]
+        state = str(h.get("state") or "Texas").lower()
+        code = str(h.get("state_code") or "TX").lower()
+        _home_cache.update(
+            key=key, city=h.get("city") or "Austin", state=h.get("state") or "Texas",
+            state_code=(h.get("state_code") or "TX").upper(),
+            city_re=re.compile("|".join(re.escape(t) for t in city_terms), re.I),
+            state_re=re.compile(r"\b" + re.escape(state) + r"\b|,\s?" + re.escape(code) + r"\b|^\s*" + re.escape(code) + r"\s*-"
+                                + ("|" + "|".join(r"\b" + re.escape(t) + r"\b" for t in state_terms) if state_terms else ""), re.I))
+    return _home_cache
+
+
 # A location that is just the country ("United States") means a distributed/US-wide
 # role, not a specific office — treat as remote US.
 BARE_US = re.compile(
@@ -193,8 +237,9 @@ def classify_location(loc_text, remote_hint=False, country=None):
     us = (bool(US_HINT.search(loc_text or "")) or bool(US_STATE.search(loc_text or ""))
           or bool(US_STATE_PREFIX.match(loc_text or "")) or bool(US_CITY.search(loc_text or ""))
           or bool(US_STATE_NAME.search(loc_text or "")) or (country or "").upper() in ("US", "USA"))
-    if "austin" in t or "travis county" in t:
-        return "austin"
+    h = home()
+    if h["city_re"].search(t):
+        return "home"
     if BARE_US.match(loc_text or ""):
         return "remote_us"
     if is_remote:
@@ -205,8 +250,8 @@ def classify_location(loc_text, remote_hint=False, country=None):
         return "remote_global"
     if non_us:
         return "non_us"
-    if "texas" in t or re.search(r",\s?tx\b|^\s*tx\s*-", t) or TX_CITY.search(t):
-        return "texas"
+    if h["state_re"].search(t):
+        return "home_state"
     if us:
         return "us_other"
     return "unknown"
@@ -278,7 +323,8 @@ def _keep_location(loc_class, filters):
         return False
     if loc_class == "remote_global" and not filters.get("keep_remote_global", False):
         return False
-    if loc_class == "texas" and not filters.get("keep_texas_non_austin", True):
+    keep_state = filters.get("keep_home_state", filters.get("keep_texas_non_austin", True))
+    if loc_class == "home_state" and not keep_state:
         return False
     if loc_class == "us_other" and not filters.get("keep_us_other_cities", False):
         return False
@@ -402,10 +448,6 @@ def fetch_smartrecruiters(slug, name, filters):
 
 # Search terms for query-driven boards (Workday, Amazon, Oracle) that are too large
 # to pull completely.
-BIGBOARD_TERMS = [
-    "site reliability engineer", "devops", "observability", "platform engineer",
-    "kafka", "elasticsearch", "linux administrator", "systems administrator", "kubernetes",
-]
 # Workday's reference ID for country = United States (stable across tenants).
 WD_US_FACET = "bc33aa3152ec42d4995f4791a106ed09"
 
@@ -418,7 +460,7 @@ def fetch_workday(slug, name, filters):
     headers = {**UA, "Content-Type": "application/json"}
     found = {}
     use_facet = True
-    for term in BIGBOARD_TERMS:
+    for term in search_terms():
         body = {"appliedFacets": {"locationCountry": [WD_US_FACET]} if use_facet else {},
                 "limit": 20, "offset": 0, "searchText": term}
         r = requests.post(f"{cxs}/jobs", json=body, headers=headers, timeout=TIMEOUT)
@@ -547,7 +589,7 @@ def _orc_jobs(base, site, name, public_base, source, filters, detail_cap=40):
     """Oracle Recruiting Cloud (HCM) candidate-experience API shared by fetch_oracle and
     fetch_oraclehcm. base = https://host/hcmRestApi/resources/latest, site = CX_1001 etc."""
     out, seen, details_fetched = [], set(), 0
-    for term in BIGBOARD_TERMS:
+    for term in search_terms():
         try:
             data = _get_json(f"{base}/recruitingCEJobRequisitions", params={
                 "onlyData": "true", "expand": "requisitionList.secondaryLocations",
@@ -626,7 +668,7 @@ def fetch_phenom(slug, name, filters):
     host, prefix = parts[0], (parts[1] if len(parts) > 1 else "/us/en")
     headers = {**UA, "Content-Type": "application/json", "Accept": "application/json"}
     found = {}
-    for term in BIGBOARD_TERMS:
+    for term in search_terms():
         body = {"lang": "en_us", "deviceType": "desktop", "country": "us",
                 "pageName": "search-results", "ddoKey": "refineSearch", "sortBy": "",
                 "subsearch": "", "from": 0, "jobs": True, "counts": True,
@@ -672,7 +714,7 @@ def fetch_phenom(slug, name, filters):
 def _icims_attract(host, name, filters):
     """iCIMS 'Attract' career sites (careers.<company>.com/careers-home): /api/jobs JSON."""
     found = {}
-    for term in BIGBOARD_TERMS:
+    for term in search_terms():
         try:
             data = _get_json(f"https://{host}/api/jobs", params={
                 "keywords": term, "page": 1, "sortBy": "relevance", "descending": "false",
@@ -714,7 +756,7 @@ def fetch_icims(slug, name, filters):
     sess = requests.Session()
     sess.headers.update(UA)
     found = {}
-    for term in BIGBOARD_TERMS:
+    for term in search_terms():
         try:
             r = sess.get(f"https://{host}/jobs/search", params={
                 "ss": "1", "searchKeyword": term, "in_iframe": "1"}, timeout=TIMEOUT)
@@ -779,7 +821,7 @@ def fetch_adzuna(settings, filters):
     if not app_id or not app_key:
         raise RuntimeError("no API key configured (config/settings.yaml -> adzuna)")
     country = az.get("country", "us")
-    locations = az.get("locations") or ([az["location"]] if az.get("location") else ["Austin, TX"])
+    locations = az.get("locations") or ([az["location"]] if az.get("location") else [f"{home()['city']}, {home()['state_code']}"])
     out, seen = [], set()
 
     def normalize(j):
@@ -902,8 +944,8 @@ def fetch_remoteok(filters):
 def fetch_amazon(filters):
     """amazon.jobs public search JSON (Amazon/AWS have no ATS board)."""
     out, seen = [], set()
-    for term in BIGBOARD_TERMS:
-        for loc_extra in ([("loc_query", "Austin, Texas, United States")], []):
+    for term in search_terms():
+        for loc_extra in ([("loc_query", f"{home()['city']}, {home()['state']}, United States")], []):
             params = [("base_query", term), ("normalized_country_code[]", "USA"),
                       ("result_limit", 100), ("offset", 0), ("sort", "recent")] + loc_extra
             data = _get_json("https://www.amazon.jobs/en/search.json", params=params)
@@ -939,7 +981,7 @@ ORACLE_ORC = "https://eeho.fa.us2.oraclecloud.com/hcmRestApi/resources/latest"
 def fetch_oracle(filters):
     """Oracle's own careers site API (Oracle Recruiting Cloud, public)."""
     out, seen, details_fetched = [], set(), 0
-    for term in BIGBOARD_TERMS:
+    for term in search_terms():
         data = _get_json(f"{ORACLE_ORC}/recruitingCEJobRequisitions", params={
             "onlyData": "true", "expand": "requisitionList.secondaryLocations",
             "finder": f'findReqs;siteNumber=CX_45001,keyword="{term}",limit=50,offset=0,'
@@ -1027,7 +1069,7 @@ def fetch_hn(filters):
 
 def fetch_themuse(filters):
     out = []
-    for location in ["Austin, TX", "Flexible / Remote"]:
+    for location in [f"{home()['city']}, {home()['state_code']}", "Flexible / Remote"]:
         for page in range(0, 4):
             try:
                 data = _get_json("https://www.themuse.com/api/public/jobs",

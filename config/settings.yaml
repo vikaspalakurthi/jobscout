@@ -38,10 +38,18 @@ adzuna:
   results_per_page: 50
   pages_per_query: 1        # keep low: free tier is ~1000 calls/month
 
+home:                         # where you live - drives the location classes and the Adzuna sweeps
+  city: Austin                # postings mentioning any city_terms -> class "home"
+  city_terms: [austin, travis county]
+  state: Texas                # the state name / code, plus other metros in it -> class "home_state"
+  state_code: TX
+  state_terms: [dallas, houston, san antonio, fort worth, plano, irving, frisco, richardson, mckinney,
+                round rock, cedar park, pflugerville, san marcos, sugar land, the woodlands, lewisville, katy]
+
 filters:
   max_age_days: 45          # drop aggregator posts older than this (when age is known)
   max_age_days_boards: 60   # same for direct company boards (evergreen reqs); also hides older rows from the Inbox
-  keep_texas_non_austin: true
+  keep_home_state: true         # keep onsite jobs elsewhere in your home state
   keep_us_other_cities: false   # onsite-only jobs in other US cities are dropped
   keep_remote_global: false     # remote jobs without a clear US signal are dropped
 
@@ -80,7 +88,7 @@ notify:                       # new-job digest after every refresh
   discord_webhook_url: ""     # set on the Settings page -> stored in config/local.yaml (never commit)
   min_score: 50               # only new jobs at or above this score are listed
   max_items: 15               # lines per Discord message (rest: "more in JobScout")
-  loc_classes: [austin, texas, remote_us]
+  loc_classes: [home, home_state, remote_us]
 
 apply:                        # apply pipeline (apply.py) - independent of the tailoring pipeline
   auto_plan: false            # build an application plan automatically when a resume becomes ready

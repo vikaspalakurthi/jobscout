@@ -1,0 +1,162 @@
+# Role preset: QA / SDET / Test automation.
+# Settings -> Role preset -> Load copies this file over config/skills.yaml (after a backup).
+# Edit config/skills.yaml freely afterwards; presets are starting points, not live config.
+# After loading: Rescore applies the new weights to stored jobs; the relevance rules apply
+# from the next Refresh (boards are re-read with the new title filter and search terms).
+
+preset:
+  name: QA / SDET / Test automation
+  description: Software quality, test automation, SDET, performance and release testing roles.
+
+relevance:
+  title_terms:
+    - \bqa\b|quality assurance|quality engineer|\bsdet\b|software (development )?engineer in test
+    - test (automation|engineer|engineering|architect|lead|analyst|specialist)|automation (engineer|test)
+    - (automation|testing) framework|performance test|load test|\bqe\b|release (engineer|test)
+    - test infrastructure|test platform|developer in test|quality (platform|infrastructure)
+  desc_rescue_groups:
+    - selenium|playwright|cypress|webdriver|appium|puppeteer
+    - pytest|junit|testng|jest|mocha|nunit|xunit|robot framework|cucumber|gherkin|behave
+    - rest assured|postman|api test|contract test|pact\b
+    - jmeter|gatling|\bk6\b|locust|load test|performance test
+    - test automation|automation framework|sdet|quality engineering|test strategy|test plan
+    - ci/cd|jenkins|github actions|gitlab ci
+  min_groups: 3
+  search_terms:
+    - qa engineer
+    - sdet
+    - test automation
+    - quality engineer
+    - software engineer in test
+    - test engineer
+
+view:
+  label: QA view
+  roles: [SDET, QA, Automation]
+  days: 30
+
+role_titles:
+  - {match: '\bsdet\b|software (development )?engineer in test|developer in test', label: SDET, points: 30}
+  - {match: 'test automation|automation (engineer|architect|test)|automation framework', label: Automation, points: 30}
+  - {match: '\bqa\b|quality assurance|quality engineer|\bqe\b',                       label: QA,         points: 28}
+  - {match: 'test (engineer|architect|lead|infrastructure|platform)',                 label: Test,       points: 26}
+  - {match: 'performance (test|engineer)|load test',                                  label: Performance, points: 24}
+  - {match: 'release (engineer|test)|test (analyst|specialist)',                       label: Release,    points: 18}
+  - {match: 'manual (test|qa)',                                                       label: ManualQA,   points: 10}
+
+title_blockers:
+  - 'intern\b|internship|new grad|entry.level|\bjunior\b'
+  - 'director|\bvp\b|vice president|head of|chief '
+  - '\bsales\b|marketing|recruiter|account (executive|manager)|customer success'
+  - 'hardware (test|qa)|test technician|lab technician|quality inspector|manufacturing|clinical'
+  - 'data scientist|machine learning engineer'
+
+title_penalties:
+  - {match: 'manager', points: -8}
+  - {match: 'software (engineer|developer)',
+     unless: 'test|qa|quality|sdet|automation',
+     points: -12}
+
+seniority_bonus:
+  - {match: 'senior|staff|principal|\blead\b|\bsr\.?\b', points: 6}
+
+skills:
+  cap_points: 40
+  groups:
+    - name: UI automation
+      points: 8
+      terms: [selenium, playwright, cypress, webdriver, appium, puppeteer, testcafe]
+    - name: Test frameworks
+      points: 7
+      terms: [pytest, junit, testng, jest, mocha, nunit, xunit, robot framework, cucumber, gherkin, bdd, tdd]
+    - name: API & contract testing
+      points: 6
+      terms: [rest assured, postman, api testing, contract testing, pact, graphql, swagger, openapi]
+    - name: Performance
+      points: 5
+      terms: [jmeter, gatling, k6, locust, load testing, performance testing, stress testing]
+    - name: CI/CD & tooling
+      points: 5
+      terms: [ci/cd, jenkins, github actions, gitlab ci, docker, kubernetes, git]
+    - name: Languages
+      points: 4
+      terms: [python, java, javascript, typescript, c#, kotlin, go]
+    - name: Quality practice
+      points: 3
+      terms: [test strategy, test plan, test cases, regression, shift left, exploratory testing, accessibility testing, mobile testing]
+
+freshness_bonus:
+  - {within_days: 7,  points: 6}
+  - {within_days: 14, points: 4}
+  - {within_days: 30, points: 2}
+
+source_points:
+  direct: 3
+  aggregator: 0
+
+location_points:
+  home: 15
+  home_state: 8
+  remote_us: 12
+  remote_global: 10
+  us_other: -10
+  non_us: -50
+  unknown: 0
+
+experience_bonus:
+  - {match: '(5|6|7|8|9|10|12)\+?\s*(?:\+|plus)?\s*years', points: 4}
+
+flags:
+  citizenship:
+    points: -60
+    label: "Citizenship/clearance required"
+    terms: [security clearance, ts/sci, top secret, us citizenship required, u.s. citizenship required,
+            must be a us citizen, must be a u.s. citizen, citizenship is required, polygraph, public trust clearance]
+    patterns:
+      - '\bbe (?:an? )?(?:us|u\.s\.|united states) (?:citizens?|persons?)\b'
+      - '\b(?:us|u\.s\.) citizens? only\b'
+      - '\bonly (?:us|u\.s\.) citizens\b'
+      - '\bwho are (?:us|u\.s\.) citizens\b'
+      - '\b(?:us|u\.s\.) citizen(?:s|ship)? (?:or|and|/) (?:(?:us|u\.s\.) )?(?:green card|permanent resident|lawful permanent)'
+    ignore: [polygraph protection act, eppa]
+  itar:
+    points: -40
+    label: "ITAR / US-persons restriction"
+    terms: [itar, u.s. person, us persons]
+  export_notice:
+    points: -3
+    label: "Export-control notice"
+    terms: [export control, export administration regulations, deemed export]
+  no_sponsorship:
+    points: -3
+    label: "Says no sponsorship (OK if you need none)"
+    terms: [no sponsorship, unable to sponsor, not able to sponsor, cannot sponsor, will not sponsor,
+            without sponsorship, sponsorship is not available, not offer sponsorship]
+  contract:
+    points: 0
+    label: "Contract role"
+    terms: [contract position, contract role, c2c, corp to corp, corp-to-corp, "1099", w2 contract, contract-to-hire, contract to hire]
+
+fit_profile_default: |
+  # Fit profile - judgement rules for scoring jobs (maintained by fit.py, editable)
+
+  Scores are 0-100: how well I could do THIS job on day one AND get hired for it.
+
+  ## Role fit
+  - Core match (80-95): SDET, test automation, quality engineering with real coding
+    (frameworks, CI integration, API/UI/performance automation).
+  - Adjacent (55-75): developer roles with a strong testing component, release engineering,
+    developer-productivity / test-infrastructure teams.
+  - Specialist (35-65): roles centred on one domain's tooling or compliance (medical-device
+    validation, game QA, hardware-in-the-loop) score on my depth in that domain.
+  - Manual-only QA (20-45) unless the posting is explicitly a step toward automation.
+
+  ## Seniority
+  - Senior / Staff / Lead IC titles are fine. Manager titles: lower unless hands-on.
+
+  ## Depth calibration
+  - See the skills inventory for levels. "familiar" means I can work with it with ramp-up,
+    not that I can be the expert.
+
+  ## Learned adjustments
+  (none yet - feedback from the Jobs page lands here)

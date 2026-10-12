@@ -82,6 +82,25 @@ Companies page and the Report button).
 - `fit`, `fit_reason`, `fit_gaps` (JSON), `fit_at`, `fit_version`, `fit_state`, `fit_error`
   — model fit scoring (fit.py); table `fit_feedback` holds the thumbs. See "Fit scoring".
 
+## Targeting: home metro and role presets (2026-10-12)
+
+- **Location classes** are relative to Settings → Home (`settings.home`: city + `city_terms`,
+  state + `state_code` + `state_terms`): `home` (the metro), `home_state` (other metros in the
+  state), `remote_us`, `remote_global`, `us_other`, `non_us`, `unknown`. `fetchers.home()`
+  compiles the regexes once per settings change; `db.init()` migrated the old `austin`/`texas`
+  values. `filters.keep_home_state` (old key `keep_texas_non_austin` still honoured) and
+  `keep_us_other_cities` / `keep_remote_global` decide what is stored.
+- **Role presets** (`config/presets/<id>.yaml`) are complete `skills.yaml` files with three extra
+  sections: `preset` (name/description), `relevance` (fetch-time `title_terms` regexes,
+  `desc_rescue_groups` + `min_groups`, `search_terms` for keyword-only boards), `view` (the
+  Jobs-page one-click view) and `fit_profile_default` (seed for `resume/fit-profile.md`).
+  `config/skills.yaml` is the active profile; `POST /api/presets/load {id}` copies a preset over
+  it (backup `skills.yaml.bak-<ts>`) and rescores. `scoring.load_config()` is mtime-cached and
+  `fetchers._relevance()` rebuilds its compiled rules whenever it changes, so relevance applies
+  from the next refresh without a restart. Shipped presets: `sre-devops` (default), `qa-sdet`.
+- `/api/status` carries `home` and `view` for the UI labels and the Role-view button;
+  `/api/settings` carries `home`, `presets`, `active_preset`.
+
 ## Scoring (config/skills.yaml — user-tunable, rescore applies instantly)
 
 score = title role match (max ~30, best match wins; `title_blockers` reject outright;

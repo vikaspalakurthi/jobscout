@@ -104,7 +104,7 @@
     <li><b>Relevance.</b> Boards return every job (sales, legal, design…). Titles matching SRE / DevOps / platform /
       infra / admin / Kafka / ELK / observability patterns are kept; a job whose title fails is still kept when its
       description shows at least three distinct ops signals.</li>
-    <li><b>Location.</b> Non-US is dropped; onsite-only in non-Texas US cities is dropped; global-remote without a
+    <li><b>Location.</b> Non-US is dropped; onsite-only outside your home state is dropped (Settings → Home sets the metro and state); global-remote without a
       clear US signal is dropped (all adjustable in <a href="/settings">Settings</a>).</li>
     <li><b>Age.</b> Aggregator posts older than the limit are dropped; direct boards get their own limit (default 60
       days) because companies leave evergreen requisitions open for a year, and the Inbox hides anything older.</li>
@@ -150,12 +150,11 @@
 
   <h2>Future scope, in rough order of value</h2>
   <ul>
+    <li><b>More role presets</b> (software engineer, data engineer, SAP/ERP) - each is one YAML file in <code>config/presets/</code>; the home metro is already a setting.</li>
     <li><b>Automatic board discovery.</b> Follow one Adzuna posting per employer to its landing page, fingerprint it,
       and propose the config line. Converts the remaining Adzuna-only employers into full-text boards in one run.</li>
     <li><b>Scheduled apply runs</b>: prefill in the morning window, unattended at night (the refresh side is
       scheduled already; the filler still needs a Claude session with Chrome).</li>
-    <li><b>An "SRE-family" saved filter</b> (SRE + Reliability + Platform + Infra + DevOps + Observability, Austin + US
-      remote, 30 days) so the honest LinkedIn-equivalent view is one click.</li>
     <li><b>Eightfold and SuccessFactors fetchers</b> if a clean path appears (Eightfold needs its page token).</li>
     <li><b>Contract and C2C stream.</b> A Gmail fetcher over a label you assign to recruiter mailing lists: parse each
       requirement into a job (title, location, rate, vendor), dedupe reposts, score it, and draft the reply with the

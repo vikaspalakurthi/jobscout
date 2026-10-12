@@ -196,7 +196,8 @@ def api_watchlist():
 def api_get_settings():
     s = fetchers.load_settings()
     return jsonify({"adzuna": s.get("adzuna", {}), "filters": s.get("filters", {}),
-                    "refresh": s.get("refresh", {}),
+                    "home": s.get("home", {}), "refresh": s.get("refresh", {}),
+                    "presets": list_presets(), "active_preset": scoring.load_config().get("preset", {}),
                     "resume": tailor.settings(), "resume_models": tailor.MODELS,
                     "apply": applier.settings(), "notify": notify.settings(),
                     "fit": fit.settings()})
@@ -206,7 +207,7 @@ def api_get_settings():
 def api_save_settings():
     body = request.json or {}
     patch = {}
-    for section in ("adzuna", "filters", "refresh", "resume", "apply", "notify", "fit"):
+    for section in ("adzuna", "filters", "home", "refresh", "resume", "apply", "notify", "fit"):
         if isinstance(body.get(section), dict):
             patch[section] = body[section]
     if not patch:
@@ -846,6 +847,9 @@ def api_status():
     return jsonify({
         "refresh": {k: refresh_state[k] for k in
                     ("running", "message", "phase", "done", "total", "failed", "started", "trigger")},
+        "home": {"city": fetchers.home()["city"], "state": fetchers.home()["state"],
+                 "state_code": fetchers.home()["state_code"]},
+        "view": scoring.load_config().get("view") or {},
         "auto_refresh": {"next": _auto_state["next"],
                          "at": ["%02d:%02d" % s for s in parse_slots(_refresh_cfg().get("at"))],
                          "every_hours": _refresh_cfg().get("every_hours") or 0},
@@ -862,6 +866,42 @@ def api_status():
             "total": sum(counts.values()),
         },
     })
+
+
+PRESETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "presets")
+
+
+def list_presets():
+    import yaml
+    out = []
+    for fn in sorted(os.listdir(PRESETS_DIR)) if os.path.isdir(PRESETS_DIR) else []:
+        if fn.endswith(".yaml"):
+            with open(os.path.join(PRESETS_DIR, fn), encoding="utf-8") as f:
+                meta = (yaml.safe_load(f) or {}).get("preset") or {}
+            out.append({"id": fn[:-5], "name": meta.get("name", fn[:-5]), "description": meta.get("description", "")})
+    return out
+
+
+@app.get("/api/presets")
+def api_presets():
+    return jsonify({"presets": list_presets(), "active": scoring.load_config().get("preset", {})})
+
+
+@app.post("/api/presets/load")
+def api_presets_load():
+    """Copy config/presets/<id>.yaml over config/skills.yaml (backup kept), then rescore.
+    Relevance/search terms apply from the next refresh; existing rows keep their fit scores."""
+    pid = re.sub(r"[^a-z0-9\-]", "", ((request.json or {}).get("id") or "").lower())
+    src = os.path.join(PRESETS_DIR, pid + ".yaml")
+    if not pid or not os.path.exists(src):
+        return jsonify({"ok": False, "error": "unknown preset"}), 400
+    import shutil
+    from datetime import datetime as _dt
+    backup = scoring.SKILLS_PATH + f".bak-{_dt.now():%Y%m%d-%H%M%S}"
+    shutil.copy(scoring.SKILLS_PATH, backup)
+    shutil.copy(src, scoring.SKILLS_PATH)
+    n = scoring.rescore_all(db)
+    return jsonify({"ok": True, "preset": pid, "backup": os.path.basename(backup), "rescored": n})
 
 
 @app.post("/api/rescore")
