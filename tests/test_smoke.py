@@ -23,9 +23,9 @@ SRE_DESC = ("We run Kubernetes on AWS with Prometheus, Grafana and OpenTelemetry
 class Classifiers(unittest.TestCase):
     def test_location_classes(self):
         cases = {
-            "Austin, TX": "austin",
-            "Austin, Texas": "austin",
-            "Dallas, TX": "texas",
+            "Austin, TX": "home",
+            "Austin, Texas": "home",
+            "Dallas, TX": "home_state",
             "Remote - United States": "remote_us",
             "Foster City, CA": "us_other",          # the ISO-code trap: CA is California, not Canada
             "Bangalore, India": "non_us",
@@ -39,6 +39,24 @@ class Classifiers(unittest.TestCase):
         self.assertTrue(fetchers.is_relevant("Site Reliability Engineer", ""))
         self.assertTrue(fetchers.is_relevant("Senior DevOps Engineer", ""))
         self.assertFalse(fetchers.is_relevant("Account Executive", "sell our product"))
+        self.assertFalse(fetchers.is_relevant("SDET II", ""), "QA titles are not in the SRE preset")
+
+    def test_qa_preset_relevance(self):
+        """Loading a preset changes what is fetched (relevance) and how titles are labelled."""
+        import yaml
+        qa = yaml.safe_load(open(os.path.join(ROOT, "config", "presets", "qa-sdet.yaml"), encoding="utf-8"))
+        saved = dict(scoring._cache)
+        try:
+            # inject the preset as the active profile (mtime must match or load_config re-reads the file)
+            scoring._cache.update(mtime=os.stat(scoring.SKILLS_PATH).st_mtime_ns, cfg=qa)
+            fetchers._rel_cache["key"] = None
+            self.assertTrue(fetchers.is_relevant("SDET II", ""))
+            self.assertFalse(fetchers.is_relevant("Site Reliability Engineer", ""))
+            self.assertIn("sdet", fetchers.search_terms())
+            s, b, f = scoring.Scorer(qa).score("Senior SDET", "selenium pytest ci/cd playwright", "home")
+            self.assertEqual(b["title"]["label"], "SDET")
+        finally:
+            scoring._cache.update(saved); fetchers._rel_cache["key"] = None
 
     def test_norm_shape(self):
         j = fetchers._norm("greenhouse", 1, "Acme", "SRE", "Austin, TX", "https://x", SRE_DESC,

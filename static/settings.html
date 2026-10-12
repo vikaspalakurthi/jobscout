@@ -52,10 +52,46 @@
   </div>
 
   <div class="form-card">
+    <h2>Home</h2>
+    <p class="help">Where you live. Postings in your metro get the location class <b>home</b>; other metros in your state
+      get <b>home_state</b>; the rest is remote-US / other-US / non-US. Drives the location filters, the scoring
+      points in <span class="mono">skills.yaml</span>, the fit gate and the Adzuna sweeps. Applies from the next Refresh
+      (existing rows reclassify on Rescore).</p>
+    <div class="form-row">
+      <label for="hm-city">City</label><input type="text" id="hm-city" style="width:140px">
+      <label for="hm-city-terms">also matches</label><input type="text" id="hm-city-terms" style="width:260px" placeholder="austin, travis county">
+    </div>
+    <div class="form-row">
+      <label for="hm-state">State</label><input type="text" id="hm-state" style="width:120px">
+      <label for="hm-code">code</label><input type="text" id="hm-code" style="width:50px" maxlength="2">
+      <label for="hm-state-terms">other metros in the state</label><input type="text" id="hm-state-terms" style="width:360px" placeholder="dallas, houston, san antonio, ...">
+    </div>
+    <div class="form-row">
+      <button class="primary" id="hm-save">Save</button>
+      <span class="status-line" id="hm-status"></span>
+    </div>
+  </div>
+
+  <div class="form-card">
+    <h2>Role preset</h2>
+    <p class="help">A preset is a complete <span class="mono">config/skills.yaml</span>: which titles are fetched at all,
+      the search terms for keyword-only boards, scoring weights, and the starting fit rules. Loading one replaces
+      skills.yaml (a timestamped backup is kept) and rescores; the fetch rules apply from the next Refresh. Edit
+      skills.yaml by hand for anything finer.</p>
+    <div class="form-row">
+      <label for="rp-sel">Preset</label>
+      <select id="rp-sel"></select>
+      <button class="primary" id="rp-load">Load preset</button>
+      <span class="status-line" id="rp-status"></span>
+    </div>
+    <p class="help" id="rp-desc"></p>
+  </div>
+
+  <div class="form-card">
     <h2>Location filters</h2>
     <p class="help">What gets kept at fetch time. Applies from the next Refresh.</p>
     <div class="form-row">
-      <label><input type="checkbox" id="ft-tx"> Keep Texas outside Austin (DFW, Houston, San Antonio metros)</label>
+      <label><input type="checkbox" id="ft-tx"> Keep onsite jobs elsewhere in my home state</label>
     </div>
     <div class="form-row">
       <label><input type="checkbox" id="ft-us"> Keep onsite jobs in other US cities</label>
@@ -234,7 +270,7 @@
       <label for="nt-max">Max lines per message</label>
       <input type="number" id="nt-max" min="1" max="40" style="width:80px">
       <label for="nt-locs">Locations</label>
-      <input type="text" id="nt-locs" style="width:220px" placeholder="austin, texas, remote_us">
+      <input type="text" id="nt-locs" style="width:220px" placeholder="home, home_state, remote_us">
     </div>
     <div class="form-row">
       <button class="primary" id="nt-save">Save</button>
@@ -259,7 +295,16 @@ async function load() {
   $('az-key').value = s.adzuna.app_key || '';
   const locs = s.adzuna.locations || (s.adzuna.location ? [s.adzuna.location] : []);
   $('az-locs').value = locs.join('; ');
-  $('ft-tx').checked = s.filters.keep_texas_non_austin !== false;
+  $('ft-tx').checked = (s.filters.keep_home_state ?? s.filters.keep_texas_non_austin) !== false;
+  const hm = s.home || {};
+  $('hm-city').value = hm.city || ''; $('hm-city-terms').value = (hm.city_terms || []).join(', ');
+  $('hm-state').value = hm.state || ''; $('hm-code').value = hm.state_code || '';
+  $('hm-state-terms').value = (hm.state_terms || []).join(', ');
+  $('rp-sel').innerHTML = (s.presets || []).map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+  const active = (s.presets || []).find(p => p.name === (s.active_preset || {}).name);
+  if (active) $('rp-sel').value = active.id;
+  const showDesc = () => { const p = (s.presets || []).find(x => x.id === $('rp-sel').value); $('rp-desc').textContent = p ? p.description + ((s.active_preset || {}).name === p.name ? ' (active)' : '') : ''; };
+  $('rp-sel').onchange = showDesc; showDesc();
   $('ft-us').checked = !!s.filters.keep_us_other_cities;
   $('ft-global').checked = !!s.filters.keep_remote_global;
   $('ft-age').value = s.filters.max_age_days || 45;
@@ -373,7 +418,7 @@ $('ft-save').onclick = async () => {
   const r = await (await fetch('/api/settings', { method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({ filters: {
-      keep_texas_non_austin: $('ft-tx').checked,
+      keep_home_state: $('ft-tx').checked,
       keep_us_other_cities: $('ft-us').checked,
       keep_remote_global: $('ft-global').checked,
       max_age_days: parseInt($('ft-age').value) || 45,
@@ -405,6 +450,27 @@ $('fit-show').onclick = async () => {
   const r = await (await fetch('/api/fit/profile')).json();
   pre.textContent = `# version ${r.version} - resume/fit-profile.md (editable by hand too)\n\n` + r.text;
   pre.style.display = 'block';
+};
+
+$('hm-save').onclick = async () => {
+  const list = v => v.split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+  const r = await (await fetch('/api/settings', { method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ home: {
+      city: $('hm-city').value.trim(), city_terms: list($('hm-city-terms').value) .length ? list($('hm-city-terms').value) : [$('hm-city').value.trim().toLowerCase()],
+      state: $('hm-state').value.trim(), state_code: $('hm-code').value.trim().toUpperCase(),
+      state_terms: list($('hm-state-terms').value) } }) })).json();
+  flash($('hm-status'), r.ok ? 'Saved. Rescore to reclassify stored jobs; new fetches use it right away.' : (r.error || 'Save failed'), r.ok);
+};
+$('rp-load').onclick = async () => {
+  const id = $('rp-sel').value;
+  if (!confirm(`Replace config/skills.yaml with the "${$('rp-sel').selectedOptions[0].text}" preset? A backup is kept. Stored jobs are rescored now; the fetch rules apply from the next Refresh.`)) return;
+  $('rp-load').disabled = true;
+  const r = await (await fetch('/api/presets/load', { method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ id }) })).json();
+  $('rp-load').disabled = false;
+  flash($('rp-status'), r.ok ? `Loaded ${r.preset}; ${r.rescored} jobs rescored; backup ${r.backup}. Refresh to fetch with the new rules.` : (r.error || 'Failed'), r.ok);
+  if (r.ok) load();
 };
 
 $('rf-save').onclick = async () => {

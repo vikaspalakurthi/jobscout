@@ -1,17 +1,57 @@
-# Scoring configuration. Edit freely, then hit "Rescore" in the dashboard —
-# no refetch needed. Scores are clamped to 0–100.
-#
-# How a job is scored:
-#   title points (best matching role_titles entry, max ~30)
-# + seniority bonus (title)
-# + skills found in the description (capped at skills.cap_points)
-# + location points
-# + experience-fit bonus
-# - title_penalties, flag penalties
-# A title matching any title_blockers pattern scores 0 and is tagged "blocked".
+# Active scoring + relevance profile. Edit freely, then Rescore (weights) / Refresh (relevance).
+# Started from config/presets/sre-devops.yaml; Settings -> Role preset loads another preset
+# over this file (a timestamped backup is kept next to it).
+
+preset:
+  name: SRE / DevOps / Platform
+  description: Site reliability, DevOps, platform, infrastructure, observability, Kafka/Elastic platform administration.
+
+# What is fetched at all. Boards return hundreds of postings; only titles matching one of
+# these patterns (or descriptions passing the rescue rule) are stored. Regexes, case-insensitive.
+relevance:
+  title_terms:
+    - site reliab|\bsre\b|dev.?ops|observab|platform|infrastructur|\binfra\b|kafka|elastic
+    - opensearch|\belk\b|splunk|\bsiem\b|reliab|production engineer|cloud engineer
+    - cloud operations|cloud infrastructure|cloud ?ops|tech ?ops|\bops engineer
+    - operations engineer|it operations|systems? engineer|linux|\bunix\b|monitoring|telemetry
+    - logging|data platform|streaming|database reliability|incident|\bnoc\b
+    - kubernetes|\bk8s\b|admin(istrator)?\b|sysadmin|middleware|\bdba\b
+    - release engineer|build engineer|automation engineer|ci/?cd|prometheus|grafana
+    - (aws|azure|gcp) (engineer|architect)|resilience|capacity (engineer|planning)
+    - chaos engineer|performance engineer
+  # Rescue: a title that fails the prefilter is still kept when the description hits at least
+  # `min_groups` of these signal groups (catches "Software Engineer, Core Services" that is
+  # really Kafka/K8s operations work).
+  desc_rescue_groups:
+    - kafka|confluent|redpanda
+    - elasticsearch|opensearch|\belk\b|logstash|kibana|splunk
+    - prometheus|grafana|opentelemetry|datadog|new relic|observability|\bslo\b|error budget
+    - kubernetes|\bk8s\b|helm\b
+    - terraform|ansible|puppet|gitops|argocd
+    - site reliability|\bsre\b|devops|on.?call|incident response|production support
+    - ci/cd|jenkins|github actions
+    - linux|unix
+  min_groups: 3
+  # Search terms for boards that only answer keyword queries (Workday, iCIMS, Phenom, Oracle HCM,
+  # amazon.jobs). One request per term per board - keep the list short.
+  search_terms:
+    - site reliability engineer
+    - devops
+    - observability
+    - platform engineer
+    - kafka
+    - elasticsearch
+    - linux administrator
+    - systems administrator
+    - kubernetes
+
+# One-click view on the Jobs page: home + home state + US remote, these role labels, direct boards, 30 days.
+view:
+  label: SRE view
+  roles: [SRE]
+  days: 30
 
 role_titles:
-  # SRE-family titles the user counts as SRE (systems/service/platform reliability, production engineer)
   - {match: 'site reliability|\bsre\b|(systems?|service|application|platform|network|security|data) reliability engineer|production engineer', label: SRE, points: 30}
   - {match: 'observability',                               label: Observability,  points: 30}
   - {match: '\bkafka\b|streaming platform|event streaming',label: Kafka,          points: 30}
@@ -32,14 +72,12 @@ title_blockers:
   - 'director|\bvp\b|vice president|head of|chief '
   - 'front.?end|mobile engineer|\bios\b|android|ui engineer|web developer'
   - '\bsales\b|marketing|recruiter|account (executive|manager)|customer success'
-  # hardware / manufacturing "reliability" is not SRE (SpaceX, Samsung, AMD, SAIC boards)
+  # hardware / manufacturing "reliability" is not SRE
   - 'hardware reliability|product (quality )?(&|and )?reliability|equipment reliability|quality (&|and) reliability|solar cell|spacecraft|electrical engineer|mechanical engineer|manufacturing|reliability (test|technician|specialist)|supplier development|packaging reliability|power system engineer'
   - 'data scientist|\bml engineer\b|machine learning engineer'
 
 title_penalties:
   - {match: 'manager', points: -10}     # keeps SRE-manager roles visible but lower
-  # Product-development roles (building the software itself) rank below platform/admin/ops.
-  # `unless`: the penalty is skipped when the title also has ops context.
   - {match: '(java|c\+\+|rust|golang|scala|\bnode\b|backend|full.?stack) (engineer|developer)',
      points: -15}
   - {match: 'software (engineer|developer)',
@@ -51,7 +89,6 @@ seniority_bonus:
 
 skills:
   cap_points: 40
-  # Each group scores `points` when any term matches, +1 per extra distinct term (max +3).
   groups:
     - name: Elastic stack
       points: 9
@@ -75,18 +112,20 @@ skills:
       points: 3
       terms: [redis, cassandra, rabbitmq, flink, spark, airflow, zookeeper, postgres, mysql, clickhouse]
 
-freshness_bonus:      # from posting date — favors recent listings (first match wins)
+freshness_bonus:
   - {within_days: 7,  points: 6}
   - {within_days: 14, points: 4}
   - {within_days: 30, points: 2}
 
-source_points:        # direct company boards rank slightly above aggregator echoes
+source_points:
   direct: 3
   aggregator: 0
 
+# Location classes come from Settings -> Home: home (your metro), home_state (other metros
+# in your state), remote_us, remote_global, us_other (onsite elsewhere in the US), non_us.
 location_points:
-  austin: 15
-  texas: 8
+  home: 15
+  home_state: 8
   remote_us: 12
   remote_global: 10
   us_other: -10
@@ -94,7 +133,6 @@ location_points:
   unknown: 0
 
 experience_bonus:
-  # matched against description; rewards senior-level expectations (you have 10+ yrs)
   - {match: '(8|9|10|12|15)\+?\s*(?:\+|plus)?\s*years', points: 4}
 
 flags:
@@ -103,25 +141,18 @@ flags:
     label: "Citizenship/clearance required"
     terms: [security clearance, ts/sci, top secret, us citizenship required, u.s. citizenship required,
             must be a us citizen, must be a u.s. citizen, citizenship is required, polygraph, public trust clearance]
-    # patterns: regexes (matched against lowercased title+description) for phrasings with too
-    # many variants for literal terms — "Be a US Citizen", "must be U.S. citizens", "US citizens
-    # only", "US Citizen or Green Card holder", "requires U.S. citizenship or Green Card"
-    # (GC-only also excludes work-authorized non-residents). Each needs a
-    # requirement verb/qualifier so EEO lists ("...national origin, citizenship, age...") never hit.
     patterns:
       - '\bbe (?:an? )?(?:us|u\.s\.|united states) (?:citizens?|persons?)\b'
       - '\b(?:us|u\.s\.) citizens? only\b'
       - '\bonly (?:us|u\.s\.) citizens\b'
       - '\bwho are (?:us|u\.s\.) citizens\b'
       - '\b(?:us|u\.s\.) citizen(?:s|ship)? (?:or|and|/) (?:(?:us|u\.s\.) )?(?:green card|permanent resident|lawful permanent)'
-    # ignore: matches within ~120 chars of these patterns don't count (boilerplate)
     ignore: [polygraph protection act, eppa]
   itar:
     points: -40
     label: "ITAR / US-persons restriction"
     terms: [itar, u.s. person, us persons]
   export_notice:
-    # Generic export-control boilerplate; deemed-export rules rarely block hires but worth seeing.
     points: -3
     label: "Export-control notice"
     terms: [export control, export administration regulations, deemed export]
@@ -135,3 +166,32 @@ flags:
     points: 0
     label: "Contract role"
     terms: [contract position, contract role, c2c, corp to corp, corp-to-corp, "1099", w2 contract, contract-to-hire, contract to hire]
+
+# Starting judgement rules for model fit scoring (copied into resume/fit-profile.md on first use;
+# the file then learns from your thumbs and is never overwritten by a preset).
+fit_profile_default: |
+  # Fit profile - judgement rules for scoring jobs (maintained by fit.py, editable)
+
+  Scores are 0-100: how well I could do THIS job on day one AND get hired for it.
+
+  ## Role fit
+  - Core match (80-95): SRE, DevOps, platform engineering, observability, cloud infrastructure,
+    ELK/Kafka platform administration, production/operations engineering.
+  - Adjacent (55-75): systems engineering, cloud operations, release/build engineering,
+    infrastructure-flavoured software roles where operating the platform is most of the job.
+  - Specialist roles (35-65): a role that is really about ONE technology's internals (database
+    engine internals, network fabric, a vendor product) scores on my depth in that technology,
+    not on SRE generalism. Broad distributed-systems and relational-database concepts are NOT
+    the same as single-engine internals expertise.
+  - Product development (20-45): writing the product itself (backend/full-stack/data
+    engineering/ML) unless operations is explicitly the larger half.
+
+  ## Seniority
+  - Senior / Staff / Lead IC titles are fine. Manager titles: lower unless hands-on.
+
+  ## Depth calibration
+  - See the skills inventory for levels. "familiar" means I can work with it with ramp-up,
+    not that I can be the expert.
+
+  ## Learned adjustments
+  (none yet - feedback from the Jobs page lands here)

@@ -118,6 +118,9 @@ def init():
                 con.execute(f"ALTER TABLE jobs ADD COLUMN {col}")
             except sqlite3.OperationalError:
                 pass  # column already exists
+        # 2026-10-12: location classes became home-metro relative (austin -> home, texas -> home_state)
+        con.execute("UPDATE jobs SET loc_class='home' WHERE loc_class='austin'")
+        con.execute("UPDATE jobs SET loc_class='home_state' WHERE loc_class='texas'")
 
 
 def now_iso():

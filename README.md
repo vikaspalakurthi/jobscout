@@ -60,8 +60,9 @@ Click **Refresh**. The first full refresh of ~530 boards takes 10–15 minutes; 
 progress. You now have a scored, filterable inbox — that part needs nothing else.
 
 ### 2. Make it yours (10 minutes)
-1. **Targeting.** Edit `config/skills.yaml` — role titles, skill groups and weights, location
-   points, flags. Click **Rescore** (instant, no refetch).
+1. **Targeting.** Settings → **Home** (your city/state) and **Role preset** (SRE/DevOps or
+   QA/SDET today). Fine-tune `config/skills.yaml` — titles, skill weights, location points,
+   flags — then **Rescore** (instant). Relevance/search-term changes apply on the next Refresh.
 2. **Boards.** `config/companies.yaml` lists the companies fetched directly. Add one from the
    Companies page ("Add a company" probes which ATS it uses), or by hand:
    `python detect.py "Company Name"` / `python detect.py --url <careers page> "Company"`.
@@ -113,16 +114,17 @@ python notify.py test             # Discord test post
 python perf.py                    # endpoint timings; run when the UI feels slow
 ```
 
-## Who this is for, today
-The targeting is configurable (`skills.yaml`, Settings) but two things are still wired for the
-original user and are the roadmap's first items for contributors:
-- **Location classes** are Austin / Texas-metro / US-remote (`fetchers.py`). Other home metros
-  need code changes today.
-- **Work-authorization framing** assumes "authorized, no sponsorship needed, clearance roles
-  excluded" (the flag weights live in `skills.yaml`).
+## Who this is for
+Anyone running a focused search. Two settings make it yours:
+- **Home** (Settings → Home): your metro and state. Location classes (`home`, `home_state`,
+  `remote_us`, …) and the Adzuna sweeps follow it.
+- **Role preset** (Settings → Role preset): a complete scoring + fetch profile. Shipped:
+  *SRE / DevOps / Platform* and *QA / SDET / Test automation*; more are one YAML file each
+  (`config/presets/`) — see CONTRIBUTING. `config/skills.yaml` stays editable for anything finer.
 
-The two Claude Code skills read the candidate's name and facts from `resume/`, so they work for
-anyone once those files exist.
+Work-authorization answers and the citizenship/clearance exclusion come from your
+`resume/profile.yaml`; the two Claude Code skills read the candidate's name and facts from
+`resume/`, so they work for anyone once those files exist.
 
 ## Documentation
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — data flow, schema, scoring, every endpoint,

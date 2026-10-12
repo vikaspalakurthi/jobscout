@@ -28,7 +28,7 @@ import tailor
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RESUME_DIR = os.path.join(BASE_DIR, "resume")
 PROFILE_PATH = os.path.join(RESUME_DIR, "fit-profile.md")
-GATE_LOCS = ("austin", "texas", "remote_us")
+GATE_LOCS = ("home", "home_state", "remote_us")
 
 DEFAULT_PROFILE = """# Fit profile - judgement rules for scoring jobs (maintained by fit.py, editable)
 
@@ -91,8 +91,9 @@ def _log(msg):
 def profile_text():
     if not os.path.exists(PROFILE_PATH):
         os.makedirs(RESUME_DIR, exist_ok=True)
+        import scoring
         with open(PROFILE_PATH, "w", encoding="utf-8") as f:
-            f.write(DEFAULT_PROFILE)
+            f.write(scoring.load_config().get("fit_profile_default") or DEFAULT_PROFILE)
     with open(PROFILE_PATH, encoding="utf-8") as f:
         return f.read()
 
@@ -205,7 +206,7 @@ def gate_ids(min_score=None, only_ids=None, include_stale=True):
     ver = profile_version()
     sql = """SELECT id FROM jobs
              WHERE status IN ('new','starred','saved') AND COALESCE(work_auth,'') != 'citizen_only'
-               AND loc_class IN ('austin','texas','remote_us') AND score >= ?
+               AND loc_class IN ('home','home_state','remote_us') AND score >= ?
                AND COALESCE(fit_state,'') NOT IN ('queued','scoring')"""
     args = [min_score]
     if include_stale:

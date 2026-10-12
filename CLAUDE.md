@@ -85,8 +85,10 @@ python perf.py [port]            # time every UI endpoint on localhost + 127.0.0
   incl. the **Adzuna API key**; written by the in-app Settings page. Never commit keys.
 - `discover.py` — bulk board discovery (thread pool over `detect.detect_company`); output is
   reviewed and pasted into companies.yaml by hand, never appended blindly (slug collisions).
-- `config/companies.yaml` — direct-board company list. `config/skills.yaml` — all
-  scoring weights (user-tunable; treat as config, not code). `config/watchlist.yaml` —
+- `config/companies.yaml` — direct-board company list. `config/skills.yaml` — the active
+  profile: fetch-time relevance rules + all scoring weights + fit defaults (user-tunable; treat
+  as config, not code). `config/presets/*.yaml` — complete profiles to load over it (Settings →
+  Role preset); add a preset when supporting a new role family, never special-case code. `config/watchlist.yaml` —
   companies with NO public API (rendered at /watchlist for manual checking).
 - `static/` — `index.html` (jobs UI), `companies.html`, `settings.html`, `about.html`
   ("How it works"), `style.css` (shared). Vanilla JS, no build step, no frameworks.
@@ -111,8 +113,9 @@ python perf.py [port]            # time every UI endpoint on localhost + 127.0.0
   job fields only, never status fields. Every status action in the UI is a toggle.
 - Jobs are never deleted, only hidden; dedupe collapses by `fingerprint` at read time
   preferring direct sources (`SOURCE_PRIORITY` in server.py).
-- Location policy: keep Austin/Texas-metro/US-remote; drop non-US, global-remote and
-  non-TX onsite (all toggleable in Settings → stored in filters config).
+- Location policy: classes are relative to Settings → Home (`home` / `home_state` /
+  `remote_us` / ...); keep home + home state + US-remote, drop non-US, global-remote and
+  onsite elsewhere (all toggleable in Settings → filters config). Never hard-code a city.
 - Work-auth policy: `citizen_only` jobs are excluded from inbox by default (the profile's
   `needs_sponsorship: false` drives sponsorship answers).
 - Frontend texts/labels: keep the no-sponsorship framing ("no sponsorship" is OK, not a rejection).

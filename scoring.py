@@ -9,9 +9,21 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SKILLS_PATH = os.path.join(BASE_DIR, "config", "skills.yaml")
 
 
+_cache = {"mtime": None, "cfg": None}
+
+
 def load_config():
-    with open(SKILLS_PATH, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    """config/skills.yaml, parsed once per modification (fetchers reads it on every posting)."""
+    mtime = os.stat(SKILLS_PATH).st_mtime_ns
+    if _cache["mtime"] != mtime:
+        with open(SKILLS_PATH, encoding="utf-8") as f:
+            _cache.update(mtime=mtime, cfg=yaml.safe_load(f) or {})
+    return _cache["cfg"]
+
+
+def relevance():
+    """The fetch-time prefilter rules of the active profile (see config/presets)."""
+    return load_config().get("relevance") or {}
 
 
 def _term_pattern(term):
@@ -177,7 +189,7 @@ def rescore_all(database):
         # backfill: take the fresh class when the stored one is vague and the classifier
         # now sees something more specific (new location formats get fixed by a rescore)
         if fresh == "non_us" or loc_class in (None, "", "unknown") or \
-                (loc_class in ("remote_global", "us_other") and fresh in ("remote_us", "texas", "austin")) or \
+                (loc_class in ("remote_global", "us_other") and fresh in ("remote_us", "home_state", "home")) or \
                 (loc_class == "non_us" and fresh != "non_us"):    # a fixed classifier rule can un-flag a row
             loc_class = fresh
         work_mode = r["work_mode"]

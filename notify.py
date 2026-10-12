@@ -18,7 +18,7 @@ DEFAULTS = {
     "discord_webhook_url": "",
     "min_score": 50,
     "max_items": 15,
-    "loc_classes": ["austin", "texas", "remote_us"],
+    "loc_classes": ["home", "home_state", "remote_us"],
 }
 JOBSCOUT_URL = "http://localhost:8765"
 
