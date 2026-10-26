@@ -3,6 +3,6 @@
   "private": true,
   "description": "DOCX generator dependency for the tailor-resume skill",
   "dependencies": {
-    "docx": "^9.9.0"
+    "docx": "^9.14.0"
   }
 }
